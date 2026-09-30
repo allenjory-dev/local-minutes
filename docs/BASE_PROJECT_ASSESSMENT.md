@@ -55,4 +55,10 @@ Windows builds are explicitly present in .goreleaser.yaml and release assets. Na
 9. **Coverage limits:** no measured coverage percentage; no frontend test script in package.json; CI is Linux and is not proof of Windows/CUDA/real multi-speaker behavior. One transcription test file has .old suffix and is not active Go coverage.
 10. **Security defaults:** default bind is 0.0.0.0. Use 127.0.0.1. HTTP localhost needs SECURE_COOKIES=false while retaining APP_ENV=production. User data and credentials must be excluded from Git.
 
+## Initial native setup evidence
+
+Unchanged frontend build and lint passed; Go Windows binary compiled. Full `go test ./...` failed in `TestDatabaseTestSuite/TestUserCRUD` (created/updated timestamps equal) and `TestLLMTestSuite/TestGetModelsTimeout` (expected timeout was nil; test subsequently dereferences nil). These are observed failures, not a full diagnosis.
+
+First startup downloaded an approximately 6 GB Canary model before any recording was processed. NeMo/Sortformer setup failed building texterrors because Microsoft C++ Build Tools were unavailable to that build. The dedicated PyAnnote environment installed PyTorch 2.8.0+cpu and reported CUDA unavailable; its platform package configuration does not deliver a Windows CUDA wheel automatically. These findings strengthen the need for a reproducible, selective model provisioning path. No application source was changed to conceal the failures.
+
 Primary references: [source README](https://github.com/rishikanthc/Scriberr), [license](https://github.com/rishikanthc/Scriberr/blob/a353078fd96b8aca4002681813524b7397c90df1/LICENSE), [release](https://github.com/rishikanthc/Scriberr/releases/tag/v1.2.0). Source paths above refer to the pinned checkout.
