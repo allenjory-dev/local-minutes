@@ -33,7 +33,7 @@ data/uploads
 data/whisperx-env/test
 data_bak
 web/landing_bak
-CLAUDE.md
+# Local Minutes developer instructions are versioned.
 AGENTS.md
 # .env.example
 scriberr-data
@@ -71,3 +71,8 @@ tmp/
 # *.png
 dhl.txt
 __pycache__/
+
+# Local Minutes machine-only evidence and runtime data
+docs/LOCAL_ENVIRONMENT.md
+docs/BASELINE_TEST_RESULTS.md
+.local-minutes/
