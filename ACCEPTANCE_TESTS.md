@@ -23,3 +23,7 @@ Use PASS, FAIL, PARTIAL or NOT SUPPORTED. For PARTIAL, explicitly identify unexe
 - Technical claims default UNVERIFIED across UI, database and exports. Only explicit user verification with authoritative source evidence changes state; edits invalidate prior verification.
 - Local-only mode prevents cloud-provider and webhook egress; no subscription/account required for core inference.
 - Library search returns the correct session and audio timestamp; malformed packages fail safely.
+- Obsidian export creates readable summary/marker/speaker transcript notes with stable IDs; long transcripts remain completely retrievable within the assistant's read limits.
+- Re-export is idempotent, preserves user edits, detects conflicts and retries failed writes without duplicates or false success.
+- Assistant retrieval answers a synthetic meeting question with the correct session/date/timestamp; conflicting sessions and missing evidence remain explicit. Technical claims stay UNVERIFIED unless independently verified.
+- Test private-meeting exclusion before cloud-backed assistant access; metadata alone is not a privacy control. Verify phone/remote access and audio links separately from local Markdown export, including host-offline behavior.

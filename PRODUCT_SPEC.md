@@ -22,6 +22,20 @@ Markers use configurable type IDs, labels, timestamps on the original audio time
 
 AI outputs: executive summary, major takeaways, decisions, action items, follow-ups, important moments, questions and ideas, with links to transcript/audio evidence. Prefer local Ollama where practical. Do not invent commitments, deadlines, owners or missing speech.
 
+## Obsidian and personal-assistant access
+
+Added 2026-09-30 at the user's request: completed meeting/conference records must be exportable to a configured Obsidian vault so a personal assistant such as LifeBot can retrieve what happened later, including while the user is away from the laptop. This is a required future capability, not an implemented baseline feature.
+
+Export readable Markdown: session title/date/type, summary, takeaways, decisions, actions, follow-ups, questions, ideas, markers, speaker-labelled transcript and source timestamps. Include stable session IDs, processing/export revisions, source-audio hashes and links to the portable session package. Keep long transcripts in linked, bounded-size parts so assistant read limits cannot silently hide later content. Preserve UNVERIFIED status and explicit verification evidence in every exported view.
+
+The Obsidian adapter is optional and generic: vault path, destination folders and audio-copy policy are configuration. LifeBot and the user's vault paths must not be hard-coded into the core. Text must remain usable without Local Minutes running. Keep original audio in the portable package; optionally copy/link it into the vault without altering it. Audio links need a device-aware strategy; a Windows path or localhost URL is not a working phone playback link.
+
+Repeated exports must update the same session without duplicates, preserve user-authored notes and flag conflicts. Failed exports must remain visible and retryable. Obsidian export must not automatically create tasks, reminders or calendar entries from extracted actions.
+
+Saving locally and sharing with a cloud-backed assistant are separate choices. The current personal assistant may use external models; export alone must not be described as fully local Q&A. Before enabling automatic export of private meetings to an assistant-readable vault, verify an enforceable local-only/exclusion or explicitly approved cloud-processing path. Metadata labels alone cannot enforce privacy. Remote access also depends on the assistant host being awake/reachable or a separately approved hosting/sync arrangement.
+
+See docs/OBSIDIAN_INTEGRATION.md for the proposed contract and validation gates. Integration implementation remains deferred until baseline approval.
+
 ## Technical and regulatory claims
 
 Every extracted building/plumbing/gas code, standard, clause, dimension, pressure or interpretation is **UNVERIFIED** by default. Transcription confidence, repeated statements, speaker credentials and AI agreement cannot verify a claim. Verification requires an explicit human action against an authoritative source, recording the source, edition/jurisdiction, relevant passage, verifier and date. Preserve the spoken wording separately from the claim and verification record. Changed claims require renewed verification. This rule must apply to storage, UI, summaries and exports, not just a prompt.

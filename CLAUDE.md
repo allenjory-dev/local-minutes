@@ -7,6 +7,7 @@
 - Preserve local-first operation. No mandatory subscription or external AI API.
 - Spoken technical/code/regulatory claims remain UNVERIFIED until a user explicitly verifies them against an authoritative source.
 - Do not hard-code personal workflows into the generic product. Marker types and profiles are configurable.
+- Obsidian export is a required future adapter; configure vault paths and assistant access separately. Preserve user edits, source timestamps and UNVERIFIED labels. Do not assume local vault storage makes a cloud-backed assistant local or always available.
 - Never install into or repair existing global Python, CUDA, Whisper, ffmpeg or model environments as a side effect. Inspect and document before dependency changes; use isolated project environments.
 - Never publish recordings, machine inventory, tokens, secrets, model caches or runtime logs.
 - Preserve upstream LICENSE, copyright, attribution and dependency/model notices.
