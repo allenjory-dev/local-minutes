@@ -71,6 +71,7 @@ const (
 	FlagQuoteNotInCitedSegments = "quote_not_in_cited_segments"
 	FlagQuoteSpansSpeakers      = "quote_spans_speakers"
 	FlagQuoteHasGap             = "quote_has_gap"
+	FlagNumberQualifierOmitted  = "number_qualifier_omitted"
 	FlagSpeakerMismatch         = "speaker_mismatch"
 	FlagOwnerNotSupported       = "owner_not_supported"
 	FlagOwnerNotInEvidence      = "owner_not_in_evidence"

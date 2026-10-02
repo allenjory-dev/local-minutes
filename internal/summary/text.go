@@ -299,6 +299,102 @@ var (
 	}
 )
 
+// Words that change the number next to them. A quote that starts or ends at
+// a number but leaves one of these out is flagged (see checkNumberQualifiers):
+// "5 kPa" taken from "minus 5 kPa", "not more than 5 kPa" or "5 kPa or more".
+// First draft for review. Like the cues above, these are lexical signals and
+// miss anything phrased differently.
+var (
+	leadingQualifiers = phrases(
+		"minus", "negative", "plus", "plus or minus",
+		"less than", "more than", "fewer than", "greater than", "lower than", "higher than",
+		"no less than", "no more than", "no fewer than", "no greater than", "no lower than", "no higher than",
+		"under", "over", "below", "above", "up to", "at least", "at most", "within", "between",
+		"maximum", "max", "minimum", "min", "exceed", "exceeds", "exceeding",
+		"about", "around", "approximately", "approx", "roughly", "nearly", "almost", "close to",
+		"not", "never", "isn't", "aren't", "wasn't", "weren't", "don't", "doesn't", "didn't",
+		"won't", "can't", "cannot", "shouldn't",
+	)
+	trailingQualifiers = phrases(
+		"or less", "or more", "or fewer", "or lower", "or higher", "or greater",
+		"or below", "or above", "or under", "or over", "or so",
+		"and up", "and above", "and below", "and under", "and over",
+		"maximum", "max", "minimum", "min", "at most", "at least",
+		"below", "above", "under", "over", "less", "more", "lower", "higher",
+		"plus", "minus", "ish", "short",
+	)
+	numberWords = map[string]bool{
+		"zero": true, "one": true, "two": true, "three": true, "four": true, "five": true,
+		"six": true, "seven": true, "eight": true, "nine": true, "ten": true, "eleven": true,
+		"twelve": true, "thirteen": true, "fourteen": true, "fifteen": true, "sixteen": true,
+		"seventeen": true, "eighteen": true, "nineteen": true, "twenty": true, "thirty": true,
+		"forty": true, "fifty": true, "sixty": true, "seventy": true, "eighty": true,
+		"ninety": true, "hundred": true, "thousand": true, "million": true, "half": true,
+		"quarter": true, "dozen": true,
+	}
+)
+
+func phrases(list ...string) [][]string {
+	out := make([][]string, len(list))
+	for i, p := range list {
+		out[i] = words(p)
+	}
+	return out
+}
+
+// isNumberWord reports a word that is a number: it has a digit ("5", "-5",
+// "1/2") or is a number word ("five", "half").
+func isNumberWord(w string) bool {
+	if numberWords[w] {
+		return true
+	}
+	return strings.IndexFunc(w, unicode.IsDigit) >= 0
+}
+
+// firstNumber and lastNumber return the index of the first or last number in
+// ws, or -1.
+func firstNumber(ws []string) int {
+	for i, w := range ws {
+		if isNumberWord(w) {
+			return i
+		}
+	}
+	return -1
+}
+
+func lastNumber(ws []string) int {
+	for i := len(ws) - 1; i >= 0; i-- {
+		if isNumberWord(ws[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// phraseEndingAt returns the length of the longest phrase that ends just
+// before ws[p] (ws[p-n:p]), or 0.
+func phraseEndingAt(ws []string, p int, list [][]string) int {
+	best := 0
+	for _, ph := range list {
+		if n := len(ph); n > best && n <= p && p <= len(ws) && indexSeq(ws[p-n:p], ph, 0) == 0 {
+			best = n
+		}
+	}
+	return best
+}
+
+// phraseStartingAt returns the length of the longest phrase that starts at
+// ws[p] (ws[p:p+n]), or 0.
+func phraseStartingAt(ws []string, p int, list [][]string) int {
+	best := 0
+	for _, ph := range list {
+		if n := len(ph); n > best && p >= 0 && p+n <= len(ws) && indexSeq(ws[p:p+n], ph, 0) == 0 {
+			best = n
+		}
+	}
+	return best
+}
+
 var dueLeadWords = map[string]bool{
 	"by": true, "on": true, "before": true, "until": true, "till": true, "at": true,
 	"in": true, "the": true, "this": true, "due": true, "no": true, "later": true, "than": true,

@@ -104,11 +104,18 @@ func validateItem(id string, item RawItem, t *Transcript) Candidate {
 		return c
 	}
 
-	matched, covered := matchInRuns(parts, cited)
+	m, matched := findQuote(parts, cited)
+	var covered []Segment
+	if matched {
+		covered = m.covered()
+	}
 	c.QuoteMatched = matched
 	c.Evidence = evidenceFor(cited, covered)
 	if len(parts) > 1 {
 		c.flag(FlagQuoteHasGap, "", "The quote leaves out words (\"...\"); omitted words can change the meaning, so read the full segment.")
+	}
+	if matched {
+		checkNumberQualifiers(&c, parts, m, t)
 	}
 	speakerSegs := cited
 	if matched {
@@ -194,38 +201,59 @@ func canonicalSegmentIDs(raw []string) []string {
 	return out
 }
 
-// matchInRuns looks for all quote parts, in order, inside one run of
+// quoteMatch is where a quote was found: the words of one run of consecutive
+// segments, the run segment each word came from, and the matched words
+// (first to last, inclusive).
+type quoteMatch struct {
+	run         []Segment
+	hay         []string
+	owner       []int // index into run for each word
+	first, last int
+}
+
+// covered returns the segments that contain the matched words.
+func (m quoteMatch) covered() []Segment { return m.run[m.owner[m.first] : m.owner[m.last]+1] }
+
+// findQuote looks for all quote parts, in order, inside one run of
 // consecutive segments. A quote may continue across a segment boundary (ASR
-// often splits sentences) but never jumps between non-adjacent segments.
-func matchInRuns(parts [][]string, segs []Segment) (bool, []Segment) {
+// often splits sentences) but never jumps between non-adjacent segments. The
+// first place the quote is found is the one reported.
+func findQuote(parts [][]string, segs []Segment) (quoteMatch, bool) {
 	for _, run := range consecutiveRuns(segs) {
-		var hay []string
-		var owner []int // index into run for each word
+		m := quoteMatch{run: run, first: -1}
 		for i, s := range run {
 			for _, w := range words(s.Text) {
-				hay = append(hay, w)
-				owner = append(owner, i)
+				m.hay = append(m.hay, w)
+				m.owner = append(m.owner, i)
 			}
 		}
-		pos, first, last := 0, -1, -1
-		ok := true
+		pos, ok := 0, true
 		for _, p := range parts {
-			at := indexSeq(hay, p, pos)
+			at := indexSeq(m.hay, p, pos)
 			if at < 0 {
 				ok = false
 				break
 			}
-			if first < 0 {
-				first = at
+			if m.first < 0 {
+				m.first = at
 			}
-			last = at + len(p) - 1
+			m.last = at + len(p) - 1
 			pos = at + len(p)
 		}
-		if ok && first >= 0 {
-			return true, run[owner[first] : owner[last]+1]
+		if ok && m.first >= 0 {
+			return m, true
 		}
 	}
-	return false, nil
+	return quoteMatch{}, false
+}
+
+// matchInRuns reports whether the quote is found and the segments it covers.
+func matchInRuns(parts [][]string, segs []Segment) (bool, []Segment) {
+	m, ok := findQuote(parts, segs)
+	if !ok {
+		return false, nil
+	}
+	return true, m.covered()
 }
 
 func consecutiveRuns(segs []Segment) [][]Segment {
@@ -269,6 +297,113 @@ func segmentRange(segs []Segment) string {
 		return segs[0].ID
 	}
 	return segs[0].ID + "-" + segs[len(segs)-1].ID
+}
+
+// checkNumberQualifiers flags a matched quote that starts or ends next to a
+// word that changes the number it quotes: "5 kPa" taken from "minus 5 kPa",
+// "not more than 5 kPa" or "5 kPa or more". The quote still counts as found,
+// because its words are in the transcript, but the left-out words change what
+// the number means. Stacked qualifiers ("not more than") are followed back as
+// far as they go. The same speaker's segment just before or after the cited
+// ones is included, since ASR can split a phrase across segments.
+func checkNumberQualifiers(c *Candidate, parts [][]string, m quoteMatch, t *Transcript) {
+	ctx := m.context(t)
+	var notes []string
+	segID := ""
+	note := func(left []string, where string, anchor []string, at int) {
+		id := ctx.segs[at].ID
+		loc := id
+		if !c.cites(id) {
+			loc += ", not cited"
+		}
+		notes = append(notes, fmt.Sprintf("%q %s %q (%s)", strings.Join(left, " "), where, strings.Join(anchor, " "), loc))
+		if segID == "" {
+			segID = id
+		}
+	}
+
+	// Before: the quote starts at a number, or at qualifying words before it.
+	if k := firstNumber(parts[0]); k >= 0 {
+		n := ctx.first + k
+		p := n
+		for {
+			l := phraseEndingAt(ctx.words, p, leadingQualifiers)
+			if l == 0 {
+				break
+			}
+			p -= l
+		}
+		if p < ctx.first {
+			note(ctx.words[p:ctx.first], "just before", ctx.words[ctx.first:n+1], p)
+		}
+	}
+
+	// After: the quote ends at a number, or at a number and one more word
+	// (usually its unit). A bare number may also lose its unit and a
+	// qualifier ("5" taken from "5 kPa or more").
+	tail := parts[len(parts)-1]
+	if k := lastNumber(tail); k >= 0 && len(tail)-1-k <= 1 {
+		from := ctx.last - (len(tail) - 1 - k)
+		starts := []int{ctx.last + 1}
+		if k == len(tail)-1 {
+			starts = append(starts, ctx.last+2)
+		}
+		for _, at := range starts {
+			if l := phraseStartingAt(ctx.words, at, trailingQualifiers); l > 0 {
+				note(ctx.words[ctx.last+1:at+l], "right after", ctx.words[from:ctx.last+1], ctx.last+1)
+				break
+			}
+		}
+	}
+
+	if len(notes) > 0 {
+		c.flag(FlagNumberQualifierOmitted, segID,
+			"The quote leaves out %s. Words like this change what the number means, so read the full segment.",
+			strings.Join(notes, " and "))
+	}
+}
+
+// wordContext is the transcript text around a matched quote, as words.
+type wordContext struct {
+	words       []string
+	segs        []Segment // the segment each word came from
+	first, last int       // the quote's matched words
+}
+
+// context returns the matched run's words, plus the segment just before and
+// just after the run when the same speaker is talking there.
+func (m quoteMatch) context(t *Transcript) wordContext {
+	var ctx wordContext
+	add := func(s Segment) {
+		for _, w := range words(s.Text) {
+			ctx.words = append(ctx.words, w)
+			ctx.segs = append(ctx.segs, s)
+		}
+	}
+	head, tail := m.run[0], m.run[len(m.run)-1]
+	if i := head.Index - 1; i >= 0 && i < len(t.Segments) && t.Segments[i].Speaker == head.Speaker {
+		add(t.Segments[i])
+	}
+	offset := len(ctx.words)
+	for i, w := range m.hay {
+		ctx.words = append(ctx.words, w)
+		ctx.segs = append(ctx.segs, m.run[m.owner[i]])
+	}
+	if i := tail.Index + 1; i < len(t.Segments) && t.Segments[i].Speaker == tail.Speaker {
+		add(t.Segments[i])
+	}
+	ctx.first, ctx.last = offset+m.first, offset+m.last
+	return ctx
+}
+
+// cites reports whether the candidate's evidence includes segment id.
+func (c *Candidate) cites(id string) bool {
+	for _, e := range c.Evidence {
+		if e.SegmentID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // checkOwner: an owner that is a speaker label must be the speaker of the

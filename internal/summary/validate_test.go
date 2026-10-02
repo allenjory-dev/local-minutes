@@ -423,6 +423,65 @@ func TestQuoteMatchingKeepsSpacedSignsAndSymbols(t *testing.T) {
 	assert.Equal(t, VerificationUnverified, cands[0].VerificationStatus)
 }
 
+// Requested by review: "5 kPa" is literally inside "minus 5 kPa", so the
+// quote is found, but leaving out "minus" changes the number. The match stays;
+// a separate flag tells the reviewer what was left out.
+func TestQuoteLeavingOutANumberQualifierIsFlagged(t *testing.T) {
+	raw := `{"segments":[
+		{"start":0,"end":3,"text":"Set the regulator to minus 5 kPa.","speaker":"SPEAKER_00"},
+		{"start":3,"end":6,"text":"Keep the line at not more than 5 kPa.","speaker":"SPEAKER_00"},
+		{"start":6,"end":9,"text":"Allow up to 5 mm of play.","speaker":"SPEAKER_01"},
+		{"start":9,"end":12,"text":"Hold it at 7 kPa or less.","speaker":"SPEAKER_01"},
+		{"start":12,"end":15,"text":"Set the bypass to 3 kPa.","speaker":"SPEAKER_00"},
+		{"start":15,"end":17,"text":"It dropped to minus","speaker":"SPEAKER_00"},
+		{"start":17,"end":19,"text":"five degrees overnight.","speaker":"SPEAKER_00"},
+		{"start":19,"end":20,"text":"Was it minus?","speaker":"SPEAKER_01"},
+		{"start":20,"end":21,"text":"4 degrees.","speaker":"SPEAKER_00"},
+		{"start":21,"end":24,"text":"Tolerance is plus or minus 2 mm.","speaker":"SPEAKER_00"}]}`
+	tr, err := ParseStoredTranscript(raw)
+	require.NoError(t, err)
+	cases := []struct {
+		seg, quote string
+		left       string // the words the flag must name; "" means no flag
+	}{
+		{"S1", "5 kPa", `"minus" just before "5" (S1)`},
+		{"S1", "regulator to minus 5 kPa", ""},
+		{"S2", "more than 5 kPa", `"not" just before "more than 5" (S2)`},
+		{"S2", "5 kPa", `"not more than" just before "5" (S2)`},
+		{"S3", "to 5 mm of play", `"up" just before "to 5" (S3)`},
+		{"S4", "Hold it at 7 kPa", `"or less" right after "7 kpa" (S4)`},
+		{"S4", "hold it at 7", `"kpa or less" right after "7" (S4)`},
+		{"S4", "7 kPa or less", ""},
+		{"S5", "set the bypass to 3 kPa", ""},
+		{"S7", "five degrees overnight", `"minus" just before "five" (S6, not cited)`},
+		{"S9", "4 degrees", ""}, // "minus?" was another speaker's question
+		{"S10", "minus 2 mm", `"plus or" just before "minus 2" (S10)`},
+	}
+	var items []RawItem
+	for _, tc := range cases {
+		items = append(items, RawItem{Kind: KindTechnicalClaim, Text: "x", SegmentIDs: []string{tc.seg}, Quote: tc.quote})
+	}
+	cands, _ := Validate(&RawDraft{Items: items}, tr)
+	require.Len(t, cands, len(cases))
+	for i, tc := range cases {
+		c := cands[i]
+		assert.True(t, c.QuoteMatched, "quote %q stays a literal match", tc.quote)
+		assert.NotContains(t, flagCodes(c), FlagQuoteNotInCitedSegments, "quote %q", tc.quote)
+		var msg string
+		for _, f := range c.Flags {
+			if f.Code == FlagNumberQualifierOmitted {
+				msg = f.Message
+			}
+		}
+		if tc.left == "" {
+			assert.Empty(t, msg, "quote %q should not be flagged", tc.quote)
+			continue
+		}
+		assert.Contains(t, msg, "The quote leaves out "+tc.left+".", "quote %q", tc.quote)
+	}
+	assert.Equal(t, "S6", cands[9].Flags[len(cands[9].Flags)-1].SegmentID, "the flag points at the segment holding the left-out word")
+}
+
 // Cases found by independent review: quotes that hide a refusal or question,
 // verbatim deadlines and owners borrowed from a neighbouring cited segment.
 func TestReviewFoundEvasions(t *testing.T) {
