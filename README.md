@@ -192,6 +192,7 @@ Scriberr works out of the box. However, for Homebrew or manual installations, yo
 | `WHISPERX_ENV` | Path to the managed Python environment for models. | `data/whisperx-env` |
 | `OPENAI_API_KEY` | API Key for OpenAI (optional). | `""` |
 | `JWT_SECRET` | Secret for signing JWTs. Auto-generated if not set. | Auto-generated |
+| `SCRIBERR_STARTUP_MODELS` | Comma-separated model IDs to prepare at startup (for example `whisperx`). Unknown IDs or a preparation failure abort startup with an error. Unset prepares every registered model. | `""` (all models) |
 
 **Example `.env` file:**
 

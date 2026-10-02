@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -20,6 +21,10 @@ type ModelRegistry struct {
 	compositeAdapters     map[string]interfaces.CompositeAdapter
 	capabilities          map[string]interfaces.ModelCapabilities
 	initialized           bool
+	// preparedModels records models that an explicit selection prepared
+	// successfully. Failed models are deliberately absent so a later call
+	// retries them.
+	preparedModels map[string]bool
 }
 
 // Global registry instance
@@ -34,6 +39,7 @@ func GetRegistry() *ModelRegistry {
 			diarizationAdapters:   make(map[string]interfaces.DiarizationAdapter),
 			compositeAdapters:     make(map[string]interfaces.CompositeAdapter),
 			capabilities:          make(map[string]interfaces.ModelCapabilities),
+			preparedModels:        make(map[string]bool),
 		}
 	})
 	return globalRegistry
@@ -457,6 +463,152 @@ func (r *ModelRegistry) InitializeModels(ctx context.Context) error {
 	return nil
 }
 
+// startupAdapter is the minimal adapter surface used to prepare a model
+// environment at startup.
+type startupAdapter interface {
+	PrepareEnvironment(context.Context) error
+}
+
+// startupSelection is one resolved entry of an explicit startup selection
+type startupSelection struct {
+	id       string
+	typeName string
+	adapter  startupAdapter
+}
+
+// InitializeSelectedModels prepares only the named models and reports failures.
+//
+// InitializeModels prepares every registered adapter and downgrades preparation
+// failures to warnings, which is useful for a "make everything available" start
+// but pulls in dependencies the operator may not want. This entry point is for
+// an explicit selection instead: the whole list is validated before any adapter
+// is touched, so an unknown or empty model ID fails without side effects, and
+// preparation errors are returned rather than swallowed.
+//
+// Only models that prepared successfully are remembered, so a later call still
+// retries a failed model and still prepares a different selection. The legacy
+// initialize-all flag is intentionally left untouched because a subset was
+// prepared.
+func (r *ModelRegistry) InitializeSelectedModels(ctx context.Context, modelIDs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	selected, err := r.resolveStartupSelection(modelIDs)
+	if err != nil {
+		return err
+	}
+
+	if r.preparedModels == nil {
+		r.preparedModels = make(map[string]bool)
+	}
+
+	pending := make([]startupSelection, 0, len(selected))
+	for _, sel := range selected {
+		if r.preparedModels[sel.id] {
+			logger.Debug("Selected model already prepared, skipping", "model_id", sel.id)
+			continue
+		}
+		pending = append(pending, sel)
+	}
+
+	if len(pending) == 0 {
+		logger.Info("All selected models already prepared", "model_count", len(selected))
+		return nil
+	}
+
+	// Prepared sequentially: selections are small, and this keeps logs and
+	// aggregated errors deterministic.
+	var prepErrors []error
+	for _, sel := range pending {
+		logger.Info("Preparing selected model", "model_id", sel.id, "type", sel.typeName)
+		if err := sel.adapter.PrepareEnvironment(ctx); err != nil {
+			logger.Error("Failed to prepare selected model",
+				"model_id", sel.id, "type", sel.typeName, "error", err)
+			prepErrors = append(prepErrors, fmt.Errorf("%s model %s: %w", sel.typeName, sel.id, err))
+			continue
+		}
+		r.preparedModels[sel.id] = true
+		logger.Info("Selected model initialized", "model_id", sel.id, "type", sel.typeName)
+	}
+
+	if len(prepErrors) > 0 {
+		return fmt.Errorf("failed to prepare selected models: %w", errors.Join(prepErrors...))
+	}
+
+	logger.Info("Selected model initialization completed", "model_count", len(selected))
+	return nil
+}
+
+// resolveStartupSelection validates an explicit startup selection and maps each
+// ID to its adapter. Nothing is prepared here: validation must complete before
+// any environment side effects. Callers must hold r.mu.
+func (r *ModelRegistry) resolveStartupSelection(modelIDs []string) ([]startupSelection, error) {
+	if len(modelIDs) == 0 {
+		return nil, fmt.Errorf("no models selected for initialization")
+	}
+
+	var (
+		selected []startupSelection
+		unknown  []string
+	)
+	seen := make(map[string]bool, len(modelIDs))
+
+	for _, rawID := range modelIDs {
+		modelID := strings.TrimSpace(rawID)
+		if modelID == "" {
+			return nil, fmt.Errorf("selected model list contains an empty model id")
+		}
+		if seen[modelID] {
+			continue
+		}
+		seen[modelID] = true
+
+		if adapter, exists := r.transcriptionAdapters[modelID]; exists {
+			selected = append(selected, startupSelection{id: modelID, typeName: "transcription", adapter: adapter})
+			continue
+		}
+		if adapter, exists := r.diarizationAdapters[modelID]; exists {
+			selected = append(selected, startupSelection{id: modelID, typeName: "diarization", adapter: adapter})
+			continue
+		}
+		if adapter, exists := r.compositeAdapters[modelID]; exists {
+			selected = append(selected, startupSelection{id: modelID, typeName: "composite", adapter: adapter})
+			continue
+		}
+
+		unknown = append(unknown, modelID)
+	}
+
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("unknown selected model id(s): %s (registered: %s)",
+			strings.Join(unknown, ", "), strings.Join(r.registeredModelIDsLocked(), ", "))
+	}
+
+	return selected, nil
+}
+
+// registeredModelIDsLocked returns every registered model ID, sorted.
+// Callers must hold r.mu.
+func (r *ModelRegistry) registeredModelIDsLocked() []string {
+	unique := make(map[string]bool, len(r.transcriptionAdapters)+len(r.diarizationAdapters)+len(r.compositeAdapters))
+	for id := range r.transcriptionAdapters {
+		unique[id] = true
+	}
+	for id := range r.diarizationAdapters {
+		unique[id] = true
+	}
+	for id := range r.compositeAdapters {
+		unique[id] = true
+	}
+
+	ids := make([]string, 0, len(unique))
+	for id := range unique {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // GetModelStatus returns the status of all registered models
 func (r *ModelRegistry) GetModelStatus(ctx context.Context) map[string]bool {
 	r.mu.RLock()
@@ -563,6 +715,7 @@ func ClearRegistry() {
 	registry.diarizationAdapters = make(map[string]interfaces.DiarizationAdapter)
 	registry.compositeAdapters = make(map[string]interfaces.CompositeAdapter)
 	registry.capabilities = make(map[string]interfaces.ModelCapabilities)
+	registry.preparedModels = make(map[string]bool)
 	registry.initialized = false
 }
 

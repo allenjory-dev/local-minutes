@@ -39,6 +39,13 @@ const (
 	OutputFormatJSON     = "json"
 )
 
+// StartupModelsSetting is the setting that restricts startup model preparation
+// to an explicit comma-separated list of registered model IDs, for example
+// "whisperx". It can be set in the environment or in the .env file that
+// config.Load reads. When unset or blank, every registered adapter is prepared
+// as before.
+const StartupModelsSetting = "SCRIBERR_STARTUP_MODELS"
+
 // UnifiedTranscriptionService provides a unified interface for all transcription and diarization models
 type UnifiedTranscriptionService struct {
 	registry              *registry.ModelRegistry
@@ -77,7 +84,9 @@ func (u *UnifiedTranscriptionService) SetBroadcaster(b *sse.Broadcaster) {
 	u.broadcaster = b
 }
 
-// Initialize prepares all registered models for use
+// Initialize prepares registered models for use. By default every registered
+// model is prepared; an explicit StartupModelsSetting selection prepares only
+// the listed models.
 func (u *UnifiedTranscriptionService) Initialize(ctx context.Context) error {
 	logger.Info("Initializing unified transcription service")
 
@@ -89,13 +98,58 @@ func (u *UnifiedTranscriptionService) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Initialize all registered models
-	if err := u.registry.InitializeModels(ctx); err != nil {
-		return fmt.Errorf("failed to initialize models: %w", err)
+	selectedModels, err := parseStartupModels(os.Getenv(StartupModelsSetting))
+	if err != nil {
+		return fmt.Errorf("invalid %s setting: %w", StartupModelsSetting, err)
+	}
+
+	if len(selectedModels) == 0 {
+		// Unconfigured: keep preparing every registered model.
+		if err := u.registry.InitializeModels(ctx); err != nil {
+			return fmt.Errorf("failed to initialize models: %w", err)
+		}
+	} else {
+		// Only the selected models are prepared. WhisperX runs its own
+		// integrated diarization, so a "whisperx" selection deliberately
+		// leaves the separate pyannote environment unprepared.
+		logger.Info("Initializing selected models only",
+			"setting", StartupModelsSetting, "models", selectedModels)
+		if err := u.registry.InitializeSelectedModels(ctx, selectedModels); err != nil {
+			return fmt.Errorf("failed to initialize selected models: %w", err)
+		}
 	}
 
 	logger.Info("Unified transcription service initialized successfully")
 	return nil
+}
+
+// parseStartupModels parses the comma-separated StartupModelsSetting value.
+//
+// A blank value means "not configured" and yields no selection, which keeps the
+// previous initialize-all behavior. Otherwise IDs are trimmed and deduplicated,
+// and an empty token is rejected so a typo such as "whisperx,," cannot silently
+// change the selection.
+func parseStartupModels(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var selected []string
+	seen := make(map[string]bool)
+
+	for _, token := range strings.Split(raw, ",") {
+		modelID := strings.TrimSpace(token)
+		if modelID == "" {
+			return nil, fmt.Errorf("empty model id in %q", raw)
+		}
+		if seen[modelID] {
+			continue
+		}
+		seen[modelID] = true
+		selected = append(selected, modelID)
+	}
+
+	return selected, nil
 }
 
 // ProcessJob processes a transcription job using the new adapter architecture

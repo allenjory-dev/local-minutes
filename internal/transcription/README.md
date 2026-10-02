@@ -204,6 +204,12 @@ service := transcription.NewUnifiedTranscriptionService()
 err := service.Initialize(ctx) // Downloads and sets up all models
 ```
 
+Set `SCRIBERR_STARTUP_MODELS` to a comma-separated list of registered model IDs
+to prepare only those models instead, for example `SCRIBERR_STARTUP_MODELS=whisperx`.
+The list is validated before any preparation runs; unknown IDs and preparation
+failures make `Initialize` return an error. Unset keeps the initialize-all
+behavior, which logs preparation failures as warnings.
+
 ## Configuration
 
 Models can be configured via parameters:

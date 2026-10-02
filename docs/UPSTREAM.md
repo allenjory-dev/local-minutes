@@ -11,6 +11,8 @@
 
 ## Change log
 
+2026-10-02: opt-in startup model selection. `SCRIBERR_STARTUP_MODELS` is an optional comma-separated list of registered model IDs; when set, only those adapters are prepared, the whole list is validated before any preparation runs, and unknown IDs or preparation failures return an error instead of a warning. Unset configuration keeps upstream's prepare-every-adapter behavior, including its tolerance of preparation failures. Selecting `whisperx` alone leaves the separate pyannote environment unprepared because WhisperX diarizes internally. Added registry and service regression tests. No engine, default or UI change.
+
 2026-10-02: diarization qualification correction for Windows AMD64 wheel selection, matched torch/torchaudio 2.8 and TorchCodec 0.7 pins, and read-only FFmpeg waveform decoding to avoid missing shared-DLL dependencies. Added platform-marker and real-decoder tests. Model inference still requires separate proof; see DIARIZATION_SETUP.md.
 
 2026-10-02: user-approved safety follow-up. Audio uploads retain WebM originals with a separate playback derivative and an additive original_audio_path reference. WhisperX/pyannote tokens move from process arguments to child environments; child log output redacts the resolved token across write boundaries. Added focused regression tests. See SAFETY_PATCH.md for scope, remaining ingestion/storage risks and verification.
