@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Audio diarization using PyAnnote"
 requires-python = ">=3.10"
 dependencies = [
-    "torch>=2.5.0",
-    "torchaudio>=2.5.0",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
     "huggingface-hub>=0.28.1",
     "pyannote.audio==4.0.2"
 ]
@@ -18,19 +18,19 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "torchcodec ; sys_platform != 'linux' or platform_machine != 'aarch64'"
+    "torchcodec~=0.7.0 ; sys_platform != 'linux' or platform_machine != 'aarch64'"
 ]
 
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
-    { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
-    { index = "pytorch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and platform_machine != 'AMD64' and sys_platform != 'darwin'" },
+    { index = "pytorch", marker = "(platform_machine == 'x86_64' or platform_machine == 'AMD64') and (sys_platform == 'linux' or sys_platform == 'win32')" },
 ]
 torchaudio = [
     { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
-    { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
-    { index = "pytorch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and platform_machine != 'AMD64' and sys_platform != 'darwin'" },
+    { index = "pytorch", marker = "(platform_machine == 'x86_64' or platform_machine == 'AMD64') and (sys_platform == 'linux' or sys_platform == 'win32')" },
 ]
 
 [[tool.uv.index]]

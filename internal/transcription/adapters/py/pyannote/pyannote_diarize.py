@@ -8,6 +8,8 @@ import argparse
 import json
 import sys
 import os
+import subprocess
+import numpy as np
 from pathlib import Path
 from pyannote.audio import Pipeline
 import torch
@@ -22,6 +24,25 @@ except ImportError:
     pass
 except Exception as e:
     print(f"Warning: Could not add safe globals: {e}")
+
+
+def load_audio_for_diarization(audio_path: str):
+    """Decode a read-only source through the existing FFmpeg executable.
+
+    Passing a waveform is supported by pyannote and avoids TorchCodec's
+    additional shared-FFmpeg DLL requirement on Windows.
+    """
+    process = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", audio_path,
+         "-f", "f32le", "-ac", "1", "-ar", "16000", "pipe:1"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if process.returncode != 0:
+        raise RuntimeError("FFmpeg could not decode the source audio")
+    samples = np.frombuffer(process.stdout, dtype="<f4").copy()
+    if samples.size == 0:
+        raise ValueError("Audio contains no samples")
+    return {"waveform": torch.from_numpy(samples).unsqueeze(0), "sample_rate": 16000}
 
 
 def diarize_audio(
@@ -103,12 +124,13 @@ def diarize_audio(
         if max_speakers is not None:
             diarization_params["max_speakers"] = max_speakers
 
+        audio = load_audio_for_diarization(audio_path)
         if diarization_params:
             print(f"Using speaker constraints: {diarization_params}")
-            diarization = pipeline(audio_path, **diarization_params)
+            diarization = pipeline(audio, **diarization_params)
         else:
             print("Using automatic speaker detection")
-            diarization = pipeline(audio_path)
+            diarization = pipeline(audio)
 
         print(f"Diarization completed. Saving results to: {output_file}")
 
