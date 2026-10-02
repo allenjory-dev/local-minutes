@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -16,10 +17,23 @@ import (
 func TestSQLLoggerOmitsBoundValues(t *testing.T) {
 	const marker = "TRANSCRIPT-TEXT-MARKER-55e1"
 	var buf bytes.Buffer
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "log.db")), &gorm.Config{Logger: NewSQLLogger(&buf)})
+	dir := t.TempDir()
+	failIfFilesOpen(t, dir)
+	db, err := gorm.Open(sqlite.Open(filepath.Join(dir, "log.db")), &gorm.Config{Logger: NewSQLLogger(&buf)})
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Close before the temporary folder is removed: Windows cannot delete an
+	// open database file, so leaving it open failed this test there.
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := db.Exec("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL UNIQUE)").Error; err != nil {
 		t.Fatal(err)
 	}
@@ -42,10 +56,14 @@ func TestSQLLoggerOmitsBoundValues(t *testing.T) {
 // prints the statement but not the transcript text it carried.
 func TestInitializeUsesValueFreeSQLLogger(t *testing.T) {
 	const marker = "TRANSCRIPT-TEXT-MARKER-77b0"
+	dir := t.TempDir()
+	failIfFilesOpen(t, dir)
+	t.Cleanup(func() { _ = Close() }) // also on early failure, before dir is removed
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 	prev := os.Stdout
 	os.Stdout = w // the SQL logger binds stdout when the database is opened
 	done := make(chan string)
@@ -53,7 +71,7 @@ func TestInitializeUsesValueFreeSQLLogger(t *testing.T) {
 		b, _ := io.ReadAll(r)
 		done <- string(b)
 	}()
-	initErr := Initialize(filepath.Join(t.TempDir(), "wired.db"))
+	initErr := Initialize(filepath.Join(dir, "wired.db"))
 	os.Stdout = prev
 	if initErr != nil {
 		t.Fatal(initErr)
@@ -72,4 +90,27 @@ func TestInitializeUsesValueFreeSQLLogger(t *testing.T) {
 	if strings.Contains(out, marker) {
 		t.Fatalf("bound values reached the SQL log: %q", out)
 	}
+}
+
+// failIfFilesOpen fails the test if any file under dir is still open when the
+// test ends. Windows refuses to delete open files, so a database left open
+// fails t.TempDir's cleanup there; this catches the same leak on Linux. Call it
+// after t.TempDir and before registering the cleanup that closes the files.
+func failIfFilesOpen(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return
+	}
+	t.Cleanup(func() {
+		fds, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			return
+		}
+		for _, fd := range fds {
+			target, err := os.Readlink(filepath.Join("/proc/self/fd", fd.Name()))
+			if err == nil && strings.HasPrefix(target, dir+string(filepath.Separator)) {
+				t.Errorf("file still open when the test ended: %s", filepath.Base(target))
+			}
+		}
+	})
 }

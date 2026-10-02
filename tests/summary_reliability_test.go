@@ -742,6 +742,7 @@ func (legacySummaryRow) TableName() string { return "summaries" }
 func TestSummaryPersistsAcrossRestartAndMigration(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "restart.db")
+	t.Cleanup(func() { _ = database.Close() }) // also on early failure, before dir is removed (Windows)
 	helper := &TestHelper{
 		Config:      &config.Config{DatabasePath: dbPath, JWTSecret: "test-secret-key-for-unit-tests", UploadDir: filepath.Join(dir, "uploads")},
 		AuthService: auth.NewAuthService("test-secret-key-for-unit-tests"),
