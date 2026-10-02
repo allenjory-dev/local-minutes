@@ -369,6 +369,60 @@ func TestQuoteMatchingKeepsNumbersExact(t *testing.T) {
 	assert.Equal(t, VerificationUnverified, cands[1].VerificationStatus, "a matched quote still proves only that it was said")
 }
 
+// Found by review: "\u2212 5 kPa" (minus sign, space, digit) matched "5 kPa" with
+// no warning, because a sign separated from its digits by a space was dropped.
+// The same applied to other symbols set apart from a number ("< 5", "5 %").
+func TestQuoteMatchingKeepsSpacedSignsAndSymbols(t *testing.T) {
+	cases := []struct {
+		segment, quote string
+		want           bool
+	}{
+		{"Set the regulator to \u2212 5 kPa.", "to 5 kPa", false},
+		{"Set the regulator to \u2212 5 kPa.", "the regulator to 5", false},
+		{"Set the regulator to \u2212 5 kPa.", "5 kPa", false},
+		{"Set the regulator to - 5 kPa.", "to 5 kPa", false},
+		{"Set the regulator to 5 kPa.", "to \u2212 5 kPa", false},
+		{"Set the regulator to 5 kPa.", "to - 5 kPa", false},
+		{"Set the regulator to \u2212 5 kPa.", "to -5 kPa", true},
+		{"Set the regulator to -5 kPa.", "to \u2212 5 kPa", true},
+		{"The reading - 5 kPa - was fine.", "the reading 5 kPa", false}, // a dash that may be a minus is never dropped silently
+		{"Keep it < 5 kPa.", "it 5 kPa", false},
+		{"Keep it < 5 kPa.", "keep it <5 kPa", true},
+		{"Keep it < 5 kPa.", "5 kPa", false},
+		{"Tolerance \u00b1 0.5 kPa.", "0.5 kPa", false},
+		{"Tolerance \u00b1 0.5 kPa.", "tolerance 0.5 kPa", false},
+		{"The budget is $ 500.", "budget is 500", false},
+		{"The budget is $ 500.", "budget is $500", true},
+		{"A 5 % slope.", "a 5% slope", true},
+		{"A 5 % slope.", "a 5", false},
+		{"Hold 5 - 10 kPa.", "10 kPa", false},
+		{"Hold 5 - 10 kPa.", "hold 5-10 kPa", true},
+		{"Set it between -5 and -10.", "between -5 and -10", true},
+	}
+	for _, tc := range cases {
+		seg := Segment{ID: "S1", Speaker: "SPEAKER_00", Text: tc.segment}
+		got, _ := matchInRuns(quoteParts(tc.quote), []Segment{seg})
+		assert.Equal(t, tc.want, got, "quote %q in segment %q", tc.quote, tc.segment)
+	}
+
+	assert.Equal(t, []string{"to", "-5", "kpa"}, words("to \u2212 5 kPa"))
+	assert.Equal(t, []string{"5-10", "kpa"}, words("5 - 10 kPa"), "a dash between two numbers is a range, not a sign")
+	assert.Equal(t, []string{"x", "5", "x", "-5"}, words("x-5 x - 5"), "a hyphen inside a word is not a sign")
+
+	raw := `{"segments":[
+		{"start":0,"end":4,"text":"Then set the bypass to \u2212 5 kPa.","speaker":"SPEAKER_00"},
+		{"start":4,"end":6,"text":"Okay.","speaker":"SPEAKER_01"}]}`
+	tr, err := ParseStoredTranscript(raw)
+	require.NoError(t, err)
+	cands, _ := Validate(&RawDraft{Items: []RawItem{
+		{Kind: KindTechnicalClaim, Text: "Bypass setting", SegmentIDs: []string{"S1"}, Quote: "set the bypass to 5 kPa"},
+	}}, tr)
+	require.Len(t, cands, 1)
+	assert.False(t, cands[0].QuoteMatched, "a dropped minus sign is not the transcript's quote")
+	assert.Contains(t, flagCodes(cands[0]), FlagQuoteNotInCitedSegments)
+	assert.Equal(t, VerificationUnverified, cands[0].VerificationStatus)
+}
+
 // Cases found by independent review: quotes that hide a refusal or question,
 // verbatim deadlines and owners borrowed from a neighbouring cited segment.
 func TestReviewFoundEvasions(t *testing.T) {

@@ -15,15 +15,15 @@ import (
 // differences do not decide a match.
 //
 // Numbers are the exception to "punctuation is ignored": every symbol that can
-// change a number's meaning stays part of it (see numberEnd), so "-5" never
-// matches "+5" or "5", "1/2" never matches "1.2", and "7.2" never matches part
-// of "7.2.3". Such a symbol standing on its own ("5 %") is kept as a word.
+// change a number's meaning stays part of it, with or without a space in
+// between (see numberEnd). So "-5" and "- 5" never match "+5" or "5", "1/2"
+// never matches "1.2", and "7.2" never matches part of "7.2.3".
 func words(s string) []string {
 	rs := []rune(strings.ToLower(normalizeText(s)))
 	var out []string
 	for i := 0; i < len(rs); {
 		if end := numberEnd(rs, i); end > i {
-			out = append(out, string(rs[i:end]))
+			out = append(out, numberWord(rs[i:end]))
 			i = end
 			continue
 		}
@@ -39,7 +39,7 @@ func words(s string) []string {
 			continue
 		}
 		if isNumberSymbol(rs[i]) {
-			out = append(out, string(rs[i])) // "5 %" keeps its "%"; see isNumberSymbol
+			out = append(out, string(rs[i])) // a "%" or "$" with no number next to it
 		}
 		i++
 	}
@@ -74,32 +74,37 @@ func normalizeText(s string) string {
 
 const (
 	// numberSigns start a number only when no letter, digit or point comes
-	// directly before them, so "x-5" and "5-10" are not negative numbers.
+	// directly before them, so "x-5" and "COVID-19" are not negative numbers.
 	numberSigns = "+-±∓"
 	// numberMarks before a number always belong to it ("<5", "~5").
 	numberMarks = "<>≤≥≈~"
 	// numberSuffixes directly after a number belong to it ("5%", "5°", "5+").
 	numberSuffixes = "%‰°+\u2032\u2033" // the last two are prime and double prime
+	// spacedSuffixes also belong to a number after a space ("5 %", "5 °C").
+	spacedSuffixes = "%‰°"
 )
 
 // numberEnd returns the end of the number that starts at rs[i], or i when no
 // number starts there. A number keeps every symbol that can change its value
-// or meaning:
-//   - signs, comparison marks and currency symbols directly before it ("-5",
-//     "+5", "<5", "$5") and a leading decimal point (".5");
+// or meaning, with or without spaces in between:
+//   - signs, comparison marks and currency symbols before it ("-5", "- 5",
+//     "+5", "< 5", "$5") and a leading decimal point (".5");
 //   - any symbol between two digits ("1/2", "1.2", "1,200", "7.2.3", "3:30",
-//     "5-10");
-//   - a percent, degree, plus, prime or currency sign directly after it
-//     ("5%", "5°", "5+", "5€").
+//     "5-10"), and a sign or comparison mark between two numbers with spaces
+//     around it ("5 - 10" is the range "5-10", not "5" and "-10");
+//   - a percent, degree or currency sign after it ("5%", "5 %", "5 €"), and a
+//     plus or prime directly after it ("5+").
 //
 // Sentence punctuation after a number ("5.", "5,", "5)") is not kept, and
 // letters always split from digits.
 func numberEnd(rs []rune, i int) int {
 	afterWord := i > 0 && (unicode.IsLetter(rs[i-1]) || unicode.IsDigit(rs[i-1]) || rs[i-1] == '.')
+	if afterWord && strings.ContainsRune(numberSigns, rs[i]) {
+		return i // a hyphen inside a word is not a sign
+	}
 	j := i
-	for j < len(rs) && (isCurrency(rs[j]) || strings.ContainsRune(numberMarks, rs[j]) ||
-		(!afterWord && strings.ContainsRune(numberSigns, rs[j]))) {
-		j++
+	for j < len(rs) && (isCurrency(rs[j]) || strings.ContainsRune(numberSigns+numberMarks, rs[j])) {
+		j = skipSpaces(rs, j+1)
 	}
 	if j+1 < len(rs) && rs[j] == '.' && unicode.IsDigit(rs[j+1]) && !(j == i && afterWord) {
 		j++
@@ -107,27 +112,72 @@ func numberEnd(rs []rune, i int) int {
 	if j >= len(rs) || !unicode.IsDigit(rs[j]) {
 		return i
 	}
+body:
 	for j < len(rs) {
-		if unicode.IsDigit(rs[j]) {
+		switch {
+		case unicode.IsDigit(rs[j]):
 			j++
-		} else if j+1 < len(rs) && isNumberJoiner(rs[j]) && unicode.IsDigit(rs[j+1]) {
+		case j+1 < len(rs) && isNumberJoiner(rs[j]) && unicode.IsDigit(rs[j+1]):
 			j += 2
-		} else {
-			break
+		default:
+			k := skipSpaces(rs, j)
+			if k < len(rs) && strings.ContainsRune(numberSigns+numberMarks, rs[k]) {
+				if m := skipSpaces(rs, k+1); m < len(rs) && unicode.IsDigit(rs[m]) {
+					j = m // "5 - 10", "5 ± 0.5"
+					continue
+				}
+			}
+			break body
 		}
 	}
-	for j < len(rs) && (strings.ContainsRune(numberSuffixes, rs[j]) || isCurrency(rs[j])) {
+	for j < len(rs) {
+		k := skipSpaces(rs, j)
+		switch {
+		case k == j && (strings.ContainsRune(numberSuffixes, rs[j]) || isCurrency(rs[j])):
+			j++
+		case k < len(rs) && strings.ContainsRune(spacedSuffixes, rs[k]):
+			j = k + 1
+		case k < len(rs) && isCurrency(rs[k]) && !digitAfter(rs, k+1):
+			j = k + 1 // "5 €", but in "5 $10" the "$" belongs to "10"
+		default:
+			return j
+		}
+	}
+	return j
+}
+
+// numberWord is the comparison word for a number: spaces are dropped, so "- 5"
+// and "-5", or "5 %" and "5%", are the same word.
+func numberWord(rs []rune) string {
+	var b strings.Builder
+	for _, r := range rs {
+		if r != ' ' && r != '\t' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// skipSpaces returns the first index at or after j that is not a space or tab.
+func skipSpaces(rs []rune, j int) int {
+	for j < len(rs) && (rs[j] == ' ' || rs[j] == '\t') {
 		j++
 	}
 	return j
 }
 
+// digitAfter reports a digit at j, after any spaces.
+func digitAfter(rs []rune, j int) bool {
+	j = skipSpaces(rs, j)
+	return j < len(rs) && unicode.IsDigit(rs[j])
+}
+
 func isCurrency(r rune) bool { return unicode.Is(unicode.Sc, r) }
 
-// isNumberSymbol reports a symbol that changes the meaning of a nearby number.
-// Attached to a number it is part of that number's word; standing apart
-// ("5 %", "$ 5") it is a word of its own, so a quote can never add or drop it
-// unnoticed. The hyphen is left out because it is far more often a dash.
+// isNumberSymbol reports a symbol that can change the meaning of a number.
+// Next to a number it is part of that number's word; with no number next to
+// it, it is kept as a word of its own. The hyphen is left out: with no number
+// next to it, it is a dash.
 func isNumberSymbol(r rune) bool {
 	return r != '-' && (isCurrency(r) || strings.ContainsRune(numberSigns+numberMarks+numberSuffixes, r))
 }
