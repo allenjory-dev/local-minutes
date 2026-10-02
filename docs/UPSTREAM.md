@@ -22,3 +22,5 @@
 Runtime toolchains, models, user data, machine inventory and secrets are excluded from public Git history. Baseline runtime dependencies and results are recorded separately. Model licenses and access conditions must be tracked independently from the application's MIT license.
 
 2026-09-30: record the user's Obsidian/personal-assistant requirement, proposed export contract and acceptance gates. No export feature or LifeBot code changes. A dated project-document snapshot is saved separately to the user's configured local vault.
+
+2026-10-02: correct WhisperX's generic Pyannote selection/default to Community-1, matching the dedicated adapter and installed WhisperX. Preserve explicit legacy 3.1 choices; add selection/validation regression tests. The mismatch was reproduced by an app-level gated-model failure.

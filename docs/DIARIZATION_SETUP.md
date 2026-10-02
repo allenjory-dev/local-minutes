@@ -27,3 +27,7 @@ The user creates the token in their own browser. A separate local masked dialog 
 - Model access, license, local GPU and waveform/offline use: https://huggingface.co/pyannote/speaker-diarization-community-1
 - Token scopes: https://huggingface.co/docs/hub/security-tokens
 - TorchCodec compatibility and Windows shared FFmpeg requirements: https://github.com/meta-pytorch/torchcodec
+
+## App selection correction
+
+The first app-level WhisperX + Pyannote run failed because the UI alias `pyannote` was mapped to the legacy gated `speaker-diarization-3.1` model. Community-1 access does not imply access to 3.1. The adapter now maps the generic alias and its default to Community-1, matching the dedicated adapter and installed WhisperX default. Explicit legacy 3.1 selections remain unchanged; Community-1 is an allowed explicit choice. No transcription engine or Python packages were replaced. A regression test reproduced the default/alias/validation failures before the fix; all four model-selection cases and affected transcription/API tests pass afterward. End-to-end retry is recorded separately.
