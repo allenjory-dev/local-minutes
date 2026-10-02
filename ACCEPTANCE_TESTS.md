@@ -34,3 +34,11 @@ Use PASS, FAIL, PARTIAL or NOT SUPPORTED. For PARTIAL, explicitly identify unexe
 - Exact evidence quotes must exist in the cited speaker/segment, and timestamp references must come from source data. Current prompts do not enforce this.
 - Technical/regulatory state must remain UNVERIFIED in storage, display and export until explicit authoritative verification. Model-generated warnings alone do not pass.
 - Oversized input, exhausted output budgets, incomplete streams and provider failures must produce visible incomplete/failed status, never a silently accepted summary. Not yet implemented.
+
+## Summary reliability increment 1 - 2026-10-02 (branch `feature/summary-reliability-v1`)
+Synthetic, mocked-provider coverage only; see docs/SUMMARY_RELIABILITY.md. These are source/unit/integration results, not runtime acceptance.
+- Status truthfulness (provider error, unreachable, cancellation, stream without completion, unreadable stream lines, output limit, context overflow, empty, malformed, oversized input, no segments, interrupted): automated PASS; failed attempts never replace the saved summary or job cache. Windows runtime: NOT RUN.
+- Evidence references: segment existence, quote-in-cited-segment, speaker and timestamps from the transcript, rejected items kept separately: automated PASS. Real-model output quality: NOT RUN.
+- Semantic fixtures (suggestion vs commitment, refused purchase, Monday corrected to Tuesday, missing owner/deadline, wrong speaker, fabricated reference/quote, injection, no actions): flagged for review by lexical checks in automated tests. This is PARTIAL by design: lexical checks miss other phrasings and cannot detect omissions. Re-score with the real model.
+- Technical claims UNVERIFIED in storage, API, UI and exported Markdown, including legacy summaries: automated PASS; no verification workflow exists.
+- Summary-path logs free of transcript, prompt, model output and provider text (including SQL values): automated PASS. Runtime log inspection: NOT RUN.

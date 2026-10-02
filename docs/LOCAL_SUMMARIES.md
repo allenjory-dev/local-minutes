@@ -1,5 +1,7 @@
 # Local summary qualification - 2026-10-02
 
+> **Update - summary reliability increment 1 (branch `feature/summary-reliability-v1`, not yet installed):** truthful generation status, attempts that never replace a saved summary, transcript-free logs, application-set UNVERIFIED/draft status and evidence-linked candidates checked against the stored transcript. See [SUMMARY_RELIABILITY.md](SUMMARY_RELIABILITY.md). It is synthetic-tested only; the qualification below is the record for the installed build and accuracy remains FAIL until re-qualified on the real model.
+
 **Configuration works; accuracy gate FAIL.** Local GPU summaries are available as reviewable AI drafts. They are not accepted as reliable action extraction or verified technical information. This follow-up was authorized after operational step 1. No application source, transcription engine, Python environment, global PATH or CUDA installation was changed. Existing Scriberr settings/templates were used. Codex handled configuration and QA; no new source or recordings were sent to Claude or another external model.
 
 ## Daily use
@@ -57,6 +59,8 @@ Comparison retained privately:
 - All three model families used here have Apache-2.0 licenses. Their cached model manifests/licenses remain with the runtime; full model information and generated evidence are private. Unselected comparison models remain cached for reproducibility and are not loaded during daily startup. Aliases reuse weights rather than duplicate them.
 
 ## Current risks and next change
+
+Items 1-4 are addressed in code by summary reliability increment 1 (pending Codex review and runtime verification); semantic accuracy is not. Item 5 is partly addressed: oversized input is now rejected and explicit limits are sent, but long meetings are unsupported.
 
 1. **Accuracy gate failed:** do not call these outputs reliable meeting minutes or use generated actions automatically. The next implementation should produce structured candidates with segment IDs, then validate speaker/quote/time references against the actual transcript, distinguish proposals from accepted assignments, and require review before accepting actions. Validation must fail visibly; it cannot prove semantic truth by string matching alone.
 2. **UNVERIFIED must be enforced outside the model:** store verification state, render a mandatory draft/unverified indicator, and require explicit authoritative-source verification. Do not rely on the model to print a warning consistently.

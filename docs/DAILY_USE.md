@@ -2,6 +2,8 @@
 
 Updated 2026-10-02. Step 1 is the scoped operational follow-up to the baseline. The application continues to display Scriberr branding. The subsequently approved local summary setup is described in [LOCAL_SUMMARIES.md](LOCAL_SUMMARIES.md): it generates/saves local drafts, but failed accuracy qualification. Automatic meeting export to Obsidian/LifeBot, mobile capture and UI redesign remain separate work.
 
+After a build of `feature/summary-reliability-v1` is installed (not done yet; see [SUMMARY_RELIABILITY.md](SUMMARY_RELIABILITY.md)), choose **Evidence-linked draft** in the AI Summary dialog. The dialog then reports whether the draft was saved or why nothing was saved, keeps the previous draft after a failure, and lists candidates with their transcript segments, speakers, times and review flags. Every item stays "Needs review" and technical claims stay UNVERIFIED. Very long transcripts are refused rather than cut. Until that build is installed, the notes below describe the current behaviour.
+
 The desktop shortcut now invokes Start-LocalMinutesWithSummaries.ps1, which starts isolated Ollama before the existing application launcher. No model downloads occur during daily launch. In a completed recording use its action menu -> AI Summary -> Local Minutes - UNVERIFIED AI draft -> Generate Summary. Review the result against the recording: the tests found invented actions and misattributed quotes. The UI's Summary ready label means generation ended, not that it passed review. Both services remain running when the browser is closed; the AI model itself unloads after each request.
 
 ## Start and transcribe

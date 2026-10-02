@@ -1,6 +1,6 @@
 # Local Minutes
 
-Status: baseline qualification plus scoped safety and operational follow-ups approved on 2026-10-02. Foundation: Scriberr. Desktop startup and saved GPU profile are verified. The user then authorized local summary configuration/qualification: local GPU draft generation and saving work, but accuracy/claim-verification acceptance failed. See docs/LOCAL_SUMMARIES.md. Do not treat generated actions as accepted tasks or prompt warnings as enforced verification. Session packages, automatic Obsidian export, Android and additional application changes remain deferred.
+Status: baseline qualification plus scoped safety and operational follow-ups approved on 2026-10-02. Foundation: Scriberr. Desktop startup and saved GPU profile are verified. The user then authorized local summary configuration/qualification: local GPU draft generation and saving work, but accuracy/claim-verification acceptance failed. See docs/LOCAL_SUMMARIES.md. Do not treat generated actions as accepted tasks or prompt warnings as enforced verification. A scoped summary reliability increment (truthful status, evidence-linked candidates, enforced UNVERIFIED state, transcript-free logs) is on `feature/summary-reliability-v1` pending review; see docs/SUMMARY_RELIABILITY.md. Session packages, automatic Obsidian export, Android and additional application changes remain deferred.
 
 ## Purpose
 
