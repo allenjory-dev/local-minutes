@@ -73,6 +73,7 @@ Items are rejected (kept in a separate list, never presented as findings) when:
 Every other item stays `needs_review`, with flags for:
 
 - **Quote checks:** the quote's words are not found in the cited segment(s), with the location if found elsewhere; the quote has an ellipsis gap; the quote spans several speakers.
+- **Number qualifiers:** the quote starts or ends next to a word that changes its number, such as "5 kPa" taken from "minus 5 kPa", "not more than 5 kPa" or "5 kPa or more". The quote still counts as found; the flag names the left-out words.
 - **Attribution:** the model's speaker differs from the transcript's speaker.
 - **Owner:** the owner is a speaker label but did not speak the quoted words, or the owner is not in the cited text.
 - **Deadline:** not in the evidence; contradicted ("Tuesday, not Monday"); or possibly corrected later, including when the same speaker corrects themselves.
@@ -86,6 +87,16 @@ Missing or placeholder owners and deadlines become `Not stated`. Matching words 
 Numbers are the exception to "punctuation is ignored". Every symbol that can change a number stays part of it, with or without a space in between: a sign, comparison mark or currency sign before it, a leading point, any symbol between digits, and %, °, + or a currency sign after it. So "-5 kPa" and "− 5 kPa" do not match "+5 kPa" or "5 kPa", "1/2 inch" does not match "1.2 inch", ".5" does not match "5", and "Clause 7.2" does not match "Clause 7.2.3". Spacing alone does not matter: "− 5" equals "-5", "5 %" equals "5%", and "5 - 10" is the range "5-10". The Unicode minus sign and dashes count as "-", and "½" counts as "1/2". Letters still split from digits, so "300mm" matches "300 mm".
 
 A dash before a number counts as a minus sign unless it is inside a word ("COVID-19") or between two numbers (a range). A quote that leaves out such a dash is therefore reported as not found, even where the dash was only punctuation.
+
+Words are different: "5 kPa" really is in "minus 5 kPa", so the quote stays matched and the number-qualifier flag is added instead. The check looks at the words directly before a quote that starts at a number, and directly after a quote that ends at a number or a number and its unit. Stacked words are followed back ("not more than"). A bare number can also lose its unit and a qualifier ("5" taken from "5 kPa or more"). The same speaker's segment just before or after the cited ones is included, because ASR can split a phrase. Only the first place the quote is found is checked.
+
+**Qualifier words (first draft, needs sign-off before merge):**
+
+- Before a number: minus, negative, plus, plus or minus; less / more / fewer / greater / lower / higher than, and the same with "no" in front; under, over, below, above, up to, at least, at most, within, between; maximum, max, minimum, min, exceed, exceeds, exceeding; about, around, approximately, approx, roughly, nearly, almost, close to; not, never, isn't, aren't, wasn't, weren't, don't, doesn't, didn't, won't, can't, cannot, shouldn't.
+- After a number: or less, or more, or fewer, or lower, or higher, or greater, or below, or above, or under, or over, or so; and up, and above, and below, and under, and over; maximum, max, minimum, min, at most, at least; below, above, under, over, less, more, lower, higher; plus, minus, ish, short.
+- Number words that count as numbers: zero to twenty, thirty to ninety, hundred, thousand, million, half, quarter, dozen.
+
+A bare "no" is left out because "No, 5 kPa" is a common answer. Words such as "about" and "over" will also flag ordinary phrases ("What about 5 kPa?", "hand over 5 copies"); strike them if that is too noisy.
 
 ## Schema, backup and rollback
 
@@ -126,15 +137,17 @@ Independent review ran the base-commit binary on a migrated database and confirm
 | Independent code review (separate agent) | 11 findings. All fixed in `c99a790` with tests, except the documented limitations below. |
 | Real model / GPU / Windows | Not run here. Reported by the independent review on the laptop: Windows build passed, all eight synthetic meetings produced local drafts, and the migration preserved existing data on a backup copy. It found the two problems fixed in the next row. |
 | Correction round: numeric quotes and an open test database | PASS: 304 passed, 0 failed. The new number cases fail with the previous tokenizer. On Linux, an open-file check now fails the database tests if a file is still open at the end. Built as Windows test binaries and run under Wine (not a real Windows install): the previous database test fails with the same "sharing violation" cleanup error; the fixed one passes, as do the summary, LLM and summary API suites. |
-| Second review on the laptop | Both fixes pass on Windows, and two local-model drafts kept all five numeric quotes. A full Windows run had one intermittent failure in a timeout test that passed on isolated reruns; the test was not identified here. This branch's tests have no timing thresholds besides 10-second safety waits. The only test named for a timeout is the upstream `TestGetModelsTimeout` (a 1 ns deadline against a local mock server), which this branch does not change; it passed 3,000 Linux runs and 300 Wine runs. The review found "− 5 kPa" (minus sign, space, digit) still matched "5 kPa". |
+| Second review on the laptop | Both fixes pass on Windows, and two local-model drafts kept all five numeric quotes. A full Windows run had one intermittent failure in a timeout test that passed on isolated reruns. This branch's tests have no timing thresholds besides 10-second safety waits. The only test named for a timeout is the upstream `TestGetModelsTimeout` (a 1 ns deadline against a local mock server), which this branch does not change; it passed 3,000 Linux runs and 300 Wine runs. The review found "− 5 kPa" (minus sign, space, digit) still matched "5 kPa". |
 | Follow-up: spaced signs and symbols | PASS: 305 passed, 0 failed. The new cases fail with the previous tokenizer; all fixture outcomes are unchanged. The summary tests and summary API suites also pass as Windows binaries under Wine. |
+| Third review on the laptop | The spaced-symbol fix and the database cleanup tests pass on Windows. The full suite fails only `TestLLMTestSuite/TestGetModelsTimeout`, one of the two baseline failures recorded in `BASE_PROJECT_ASSESSMENT.md` before this work. The review asked for a separate warning when a quote leaves out a word such as "minus", keeping the literal match. |
+| Follow-up: number-qualifier warning | PASS: 306 passed, 0 failed. The new test fails when the check is disabled, when stacked words are not followed, when the trailing side is skipped, and when the neighbouring segment is ignored or used for any speaker. All fixture outcomes are unchanged. |
 
 ## Limitations
 
 - **Semantic accuracy is not solved.** The lexical checks miss differently phrased suggestions, commitments, refusals and corrections. Omissions cannot be detected. The overview is model-written and unchecked.
 - **No live-model verification.** Whether `local-minutes-summary:7b` returns valid schema-constrained JSON and useful candidates is untested. Prompt version `lm-grounded-2026-10-02` has not been qualified.
 - **Number formats must match exactly.** "1,200" and "1200", or "3.30" and "3:30", are reported as not found, and spelled-out numbers ("five") never match digits. These items need review rather than being matched wrongly.
-- **Words that change a number are ordinary words.** Quotes may start partway through a segment, so "5 kPa" taken from "minus 5 kPa", "less than 5 kPa" or "not 5 kPa" still counts as found, with no flag. The evidence shows the full segment. A sign split from its number by a segment boundary is not caught either.
+- **The number-qualifier flag is a word list.** It catches only the listed words, directly next to the quote, at the first place the quote is found. Other phrasing ("don't go over 5 kPa" quoted as "over 5 kPa") is missed. A symbol split from its number by a segment boundary ("set it to -" then "5 kPa") is not caught.
 - **No long-meeting support.** Long meetings are rejected. The estimate is deliberately pessimistic (often 30-60% above actual for English), so some transcripts that would fit are rejected.
 - **OpenAI-compatible providers:** the context size and JSON schema are not sent, and usage is usually unreported. A server with a smaller context than 8,192 could still truncate input; it is only caught if the server reports an error.
 - **Reviewing is not implemented.** There are no accept/dismiss controls, so every item stays "needs review". Authoritative-source verification is not implemented either: technical claims stay UNVERIFIED with no way to change that, by design for now.
