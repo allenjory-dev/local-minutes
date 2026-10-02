@@ -28,7 +28,8 @@ The local `test-whisperx.ps1` uses a disposable 30-second two-voice fixture, tin
 
 ## Pending handoff
 
-- Complete local admin setup in the browser, then resume app-level upload, CUDA transcription, playback and persistence tests.
+- Admin setup, short WAV import and app-level CUDA transcription completed on 2026-10-02. Transcript survived browser reload; full baseline acceptance remains pending.
+- Playback after first registration failed with an audio HTTP 401. Register omits the media access cookie that Login/Refresh set. Ordinary sign-out/sign-in restored playback without code changes. Text selection then Listen sought to the exact stored word timestamp. Transcript and timestamp-linked note survived a server restart. Timeline view displayed segment timestamps.
 - Pyannote access is not configured. Its gated model requires the user's own account/access acceptance. Never paste tokens into chat; upstream argument logging is a known risk.
 - Sortformer/NeMo native setup failed on a C++ build requirement. No system build tools, Docker or WSL were installed.
 - Ollama was not present; local summaries remain untested.
