@@ -11,6 +11,8 @@
 
 ## Change log
 
+2026-10-02: local summary configuration and qualification using unchanged upstream application code. Added portable Ollama startup wrapper, reproducible model definition, saved prompt and test report. Existing settings connect to loopback with cloud disabled. Desktop shortcut now starts both local services. Local generation/persistence pass; semantic accuracy and enforced claim-verification gates do not. No summary extraction feature, original audio or transcription dependency changes. See LOCAL_SUMMARIES.md.
+
 2026-10-02: opt-in startup model selection. `SCRIBERR_STARTUP_MODELS` is an optional comma-separated list of registered model IDs; when set, only those adapters are prepared, the whole list is validated before any preparation runs, and unknown IDs or preparation failures return an error instead of a warning. Unset configuration keeps upstream's prepare-every-adapter behavior, including its tolerance of preparation failures. Selecting `whisperx` alone leaves the separate pyannote environment unprepared because WhisperX diarizes internally. Added registry and service regression tests. No engine, default or UI change.
 
 2026-10-02: diarization qualification correction for Windows AMD64 wheel selection, matched torch/torchaudio 2.8 and TorchCodec 0.7 pins, and read-only FFmpeg waveform decoding to avoid missing shared-DLL dependencies. Added platform-marker and real-decoder tests. Model inference still requires separate proof; see DIARIZATION_SETUP.md.

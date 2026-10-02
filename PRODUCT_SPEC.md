@@ -1,6 +1,6 @@
 # Local Minutes
 
-Status: baseline qualification plus scoped safety and operational follow-ups approved on 2026-10-02. Foundation: Scriberr. Authorized current step: dependable desktop startup, selected-engine preparation, saved tested GPU profile and restart verification. Prior original-audio/logging safety work and short diarization tests are complete within their documented limits. Summaries, session packages, automatic Obsidian export and Android remain deferred.
+Status: baseline qualification plus scoped safety and operational follow-ups approved on 2026-10-02. Foundation: Scriberr. Desktop startup and saved GPU profile are verified. The user then authorized local summary configuration/qualification: local GPU draft generation and saving work, but accuracy/claim-verification acceptance failed. See docs/LOCAL_SUMMARIES.md. Do not treat generated actions as accepted tasks or prompt warnings as enforced verification. Session packages, automatic Obsidian export, Android and additional application changes remain deferred.
 
 ## Purpose
 

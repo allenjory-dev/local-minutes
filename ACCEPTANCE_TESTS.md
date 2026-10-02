@@ -27,3 +27,10 @@ Use PASS, FAIL, PARTIAL or NOT SUPPORTED. For PARTIAL, explicitly identify unexe
 - Re-export is idempotent, preserves user edits, detects conflicts and retries failed writes without duplicates or false success.
 - Assistant retrieval answers a synthetic meeting question with the correct session/date/timestamp; conflicting sessions and missing evidence remain explicit. Technical claims stay UNVERIFIED unless independently verified.
 - Test private-meeting exclusion before cloud-backed assistant access; metadata alone is not a privacy control. Verify phone/remote access and audio links separately from local Markdown export, including host-offline behavior.
+
+## Local summary acceptance additions - 2026-10-02
+- Require actual local GPU inference and a saved/reopened app result; these passed in LOCAL_SUMMARIES.md.
+- Treat explicit commitments, unassigned suggestions, rejected proposals, corrected deadlines and embedded instructions as separate fixtures. Current models FAIL complete semantic acceptance; retain negative results.
+- Exact evidence quotes must exist in the cited speaker/segment, and timestamp references must come from source data. Current prompts do not enforce this.
+- Technical/regulatory state must remain UNVERIFIED in storage, display and export until explicit authoritative verification. Model-generated warnings alone do not pass.
+- Oversized input, exhausted output budgets, incomplete streams and provider failures must produce visible incomplete/failed status, never a silently accepted summary. Not yet implemented.
