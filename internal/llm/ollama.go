@@ -173,13 +173,7 @@ func (s *OllamaService) ChatCompletionStream(ctx context.Context, model string, 
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		// Debug log the request body
-		if len(data) < 2000 {
-			fmt.Printf("Debug: Ollama request body: %s\n", string(data))
-		} else {
-			fmt.Printf("Debug: Ollama request body (truncated): %s...\n", string(data[:2000]))
-		}
-
+		// The request body contains transcript and chat text. Never log it.
 		resp, err := s.client.Do(req)
 		if err != nil {
 			errorChan <- fmt.Errorf("failed to make request: %w", err)
@@ -223,6 +217,115 @@ func (s *OllamaService) ChatCompletionStream(ctx context.Context, model string, 
 	}()
 
 	return contentChan, errorChan
+}
+
+type ollamaStreamRequest struct {
+	Model    string              `json:"model"`
+	Messages []ollamaChatMessage `json:"messages"`
+	Stream   bool                `json:"stream"`
+	Format   json.RawMessage     `json:"format,omitempty"`
+	Options  map[string]any      `json:"options,omitempty"`
+}
+
+type ollamaStreamChunk struct {
+	Message struct {
+		Content string `json:"content"`
+	} `json:"message"`
+	Done            bool   `json:"done"`
+	DoneReason      string `json:"done_reason"`
+	Error           string `json:"error"`
+	PromptEvalCount int    `json:"prompt_eval_count"`
+	EvalCount       int    `json:"eval_count"`
+}
+
+// StreamWithOutcome streams a chat completion and reports how it ended.
+// A stream that closes without a done=true chunk is reported as not completed;
+// an {"error":...} line is reported as a ProviderError; done_reason is passed
+// through so callers can detect an exhausted output budget ("length").
+func (s *OllamaService) StreamWithOutcome(ctx context.Context, model string, messages []ChatMessage, opts GenerationOptions, onDelta func(string) error) (out StreamOutcome) {
+	msgs := make([]ollamaChatMessage, 0, len(messages))
+	for _, m := range messages {
+		msgs = append(msgs, ollamaChatMessage(m))
+	}
+	options := map[string]any{}
+	if opts.Temperature > 0 {
+		options["temperature"] = opts.Temperature
+	}
+	if opts.MaxOutputTokens > 0 {
+		options["num_predict"] = opts.MaxOutputTokens
+	}
+	if opts.ContextTokens > 0 {
+		options["num_ctx"] = opts.ContextTokens
+	}
+	reqBody := ollamaStreamRequest{Model: model, Messages: msgs, Stream: true, Format: opts.JSONSchema}
+	if len(options) > 0 {
+		reqBody.Options = options
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		out.Err = fmt.Errorf("failed to marshal request: %w", err)
+		return out
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/api/chat", bytes.NewReader(data))
+	if err != nil {
+		out.Err = fmt.Errorf("failed to create request: %w", err)
+		return out
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			out.Err = ctxErr
+			return out
+		}
+		out.Err = fmt.Errorf("failed to reach provider: %w", err)
+		return out
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		out.Err = providerErrorFromBody(resp.StatusCode, readErrorBody(resp.Body))
+		return out
+	}
+
+	scanner := newStreamScanner(resp.Body)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var chunk ollamaStreamChunk
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			out.SkippedLines++
+			continue
+		}
+		if chunk.Error != "" {
+			out.Err = &ProviderError{Message: boundedProviderMessage(chunk.Error)}
+			return out
+		}
+		if chunk.Message.Content != "" {
+			if err := onDelta(chunk.Message.Content); err != nil {
+				out.Err = fmt.Errorf("%w: %v", ErrDeltaRejected, err)
+				return out
+			}
+		}
+		if chunk.Done {
+			out.Completed = true
+			out.FinishReason = chunk.DoneReason
+			out.PromptTokens = chunk.PromptEvalCount
+			out.OutputTokens = chunk.EvalCount
+			return out
+		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		out.Err = ctxErr
+		return out
+	}
+	if err := scanner.Err(); err != nil {
+		out.Err = fmt.Errorf("error reading stream: %w", err)
+	}
+	// Reaching EOF without done=true leaves Completed false: the stream is incomplete.
+	return out
 }
 
 // ollamaShowRequest represents the request to show model info

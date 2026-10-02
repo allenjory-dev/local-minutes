@@ -134,7 +134,7 @@ func (s *OpenAIService) GetModels(ctx context.Context) ([]string, error) {
 		} else {
 			// If custom baseURL → return all models
 			chatModels = append(chatModels, model.ID)
-    	}
+		}
 	}
 
 	return chatModels, nil
@@ -175,7 +175,8 @@ func (s *OpenAIService) ChatCompletion(ctx context.Context, model string, messag
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("[openai] chat completion error status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
+		// Provider error bodies can echo request content; log size only.
+		log.Printf("[openai] chat completion error status=%d body_bytes=%d", resp.StatusCode, len(body))
 		return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, string(body))
 	}
 
@@ -234,7 +235,8 @@ func (s *OpenAIService) ChatCompletionStream(ctx context.Context, model string, 
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			log.Printf("[openai] chat stream error status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
+			// Provider error bodies can echo request content; log size only.
+			log.Printf("[openai] chat stream error status=%d body_bytes=%d", resp.StatusCode, len(body))
 			errorChan <- fmt.Errorf("API error: %d - %s", resp.StatusCode, string(body))
 			return
 		}
@@ -287,12 +289,116 @@ func (s *OpenAIService) ChatCompletionStream(ctx context.Context, model string, 
 	return contentChan, errorChan
 }
 
-// truncate returns s trimmed to at most n runes.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+type openAIStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
+	Error json.RawMessage `json:"error"`
+}
+
+// StreamWithOutcome streams a chat completion and reports how it ended.
+// Completion requires an explicit "data: [DONE]" or a finish_reason; a stream
+// that closes without either is reported as not completed. ContextTokens and
+// JSONSchema are not sent because OpenAI-compatible servers differ in support.
+func (s *OpenAIService) StreamWithOutcome(ctx context.Context, model string, messages []ChatMessage, opts GenerationOptions, onDelta func(string) error) (out StreamOutcome) {
+	reqBody := ChatRequest{Model: model, Messages: messages, Stream: true}
+	if opts.Temperature != 0 {
+		reqBody.Temperature = opts.Temperature
 	}
-	return s[:n] + "..."
+	if opts.MaxOutputTokens > 0 {
+		reqBody.MaxTokens = opts.MaxOutputTokens
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		out.Err = fmt.Errorf("failed to marshal request: %w", err)
+		return out
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/chat/completions", bytes.NewReader(data))
+	if err != nil {
+		out.Err = fmt.Errorf("failed to create request: %w", err)
+		return out
+	}
+	req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			out.Err = ctxErr
+			return out
+		}
+		out.Err = fmt.Errorf("failed to reach provider: %w", err)
+		return out
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		out.Err = providerErrorFromBody(resp.StatusCode, readErrorBody(resp.Body))
+		return out
+	}
+
+	sawFinish := false
+	scanner := newStreamScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue // blank separators, comments and event names
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		if payload == "[DONE]" {
+			out.Completed = true
+			return out
+		}
+		var chunk openAIStreamChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			out.SkippedLines++
+			continue
+		}
+		if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
+			out.Err = providerErrorFromField(chunk.Error)
+			return out
+		}
+		if chunk.Usage != nil {
+			out.PromptTokens = chunk.Usage.PromptTokens
+			out.OutputTokens = chunk.Usage.CompletionTokens
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+		choice := chunk.Choices[0]
+		if choice.Delta.Content != "" {
+			if err := onDelta(choice.Delta.Content); err != nil {
+				out.Err = fmt.Errorf("%w: %v", ErrDeltaRejected, err)
+				return out
+			}
+		}
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			out.FinishReason = *choice.FinishReason
+			sawFinish = true
+		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		out.Err = ctxErr
+		return out
+	}
+	if err := scanner.Err(); err != nil {
+		out.Err = fmt.Errorf("error reading stream: %w", err)
+		return out
+	}
+	// A finish_reason is an explicit end-of-generation signal even if the
+	// server closed the connection before sending [DONE].
+	out.Completed = sawFinish
+	return out
 }
 
 // ValidateAPIKey validates the provided API key by making a test request
