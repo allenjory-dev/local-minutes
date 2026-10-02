@@ -1,6 +1,6 @@
 # Local Minutes
 
-Status: baseline qualification only. Foundation: Scriberr. No product feature implementation authorized beyond baseline setup.
+Status: baseline qualification with a scoped safety follow-up approved on 2026-10-02. Foundation: Scriberr. Authorized follow-up: preserve uploaded original audio, protect Hugging Face credentials in processing logs, then resume diarization qualification. Other feature work remains deferred.
 
 ## Purpose
 

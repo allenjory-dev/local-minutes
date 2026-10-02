@@ -11,6 +11,8 @@
 
 ## Change log
 
+2026-10-02: user-approved safety follow-up. Audio uploads retain WebM originals with a separate playback derivative and an additive original_audio_path reference. WhisperX/pyannote tokens move from process arguments to child environments; child log output redacts the resolved token across write boundaries. Added focused regression tests. See SAFETY_PATCH.md for scope, remaining ingestion/storage risks and verification.
+
 2026-09-30: add Local Minutes product requirements, developer rules, acceptance criteria, environment/architecture assessment, foundation decision and roadmap. No application feature changes, attribution removal or transcription-engine replacement.
 
 2026-09-30: add build-versus-reuse judgment, setup/handoff notes and observed native setup risks. Baseline binary built from the original upstream application revision. Local runtime uses WhisperX commit `771b4a14a9486f8fd5aef18ef49e35d639523dd3` as fetched by upstream initialization; its own license is BSD-2-Clause and remains in its runtime checkout.
