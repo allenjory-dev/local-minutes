@@ -18,6 +18,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\baseline-runtime\start
 
 The execution-policy setting applies only to that process. The script sets process-local paths and binds HTTP to `127.0.0.1:8787`. It does not install a Windows service or edit persistent PATH. Open http://127.0.0.1:8787. First-time local admin registration is required; never share that password or commit it.
 
+After the approved 2026-10-02 safety follow-up, use `baseline-runtime/start-safety.ps1` for the current patched executable, `scriberr-safety-1.exe`. The original baseline executable/script are retained for rollback; do not run both servers together. A consistent private database backup was made before the additive source-path migration. See SAFETY_PATCH.md for tested changes and remaining limitations.
+
 Runtime scripts are machine-local because they point to the inspected existing Python interpreter. For another machine, establish its own inventory and installation procedure rather than copying those absolute paths.
 
 Startup can take time and logs adapter failures while still reporting healthy. Confirm the selected engine actually works. Do not start a second server on the same port. Do not terminate unrelated Python/OpenWhispr processes.

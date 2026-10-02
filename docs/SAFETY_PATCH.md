@@ -24,6 +24,7 @@ This is not a complete credential-storage redesign. Existing token fields in req
 - PASS: credential redaction at every log chunk size, repeated tokens, ordinary logs, final partial text and destination write errors; child environment isolation; both adapters' command arguments exclude a synthetic token and token flags.
 - Full `go test ./...`: existing failures remain in `TestDatabaseTestSuite/TestUserCRUD` and `TestLLMTestSuite/TestGetModelsTimeout`, matching the baseline. Internal API/transcription/adapter tests pass. Tests were not weakened to obtain a green suite.
 - Runtime upgrade and post-upgrade smoke evidence are recorded separately in private local results. Unit/integration checks alone do not prove diarization or speaker quality.
+- Post-upgrade PASS: existing session opens and plays; the patched Go WhisperX adapter performs real cached CUDA transcription in offline mode (14 segments, 78 timed words). A synthetic credential is absent from command logs, child logs and transcript results. Real Hugging Face authentication and speaker diarization still require qualification.
 
 ## Model access
 
