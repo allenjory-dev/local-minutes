@@ -1,6 +1,6 @@
 # Local Minutes
 
-Status: baseline qualification with a scoped safety follow-up approved on 2026-10-02. Foundation: Scriberr. Authorized follow-up: preserve uploaded original audio, protect Hugging Face credentials in processing logs, then resume diarization qualification. Other feature work remains deferred.
+Status: baseline qualification plus scoped safety and operational follow-ups approved on 2026-10-02. Foundation: Scriberr. Authorized current step: dependable desktop startup, selected-engine preparation, saved tested GPU profile and restart verification. Prior original-audio/logging safety work and short diarization tests are complete within their documented limits. Summaries, session packages, automatic Obsidian export and Android remain deferred.
 
 ## Purpose
 

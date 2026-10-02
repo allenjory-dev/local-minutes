@@ -1,5 +1,7 @@
 # Baseline setup and handoff
 
+**Current daily-use entry point:** see [DAILY_USE.md](DAILY_USE.md) for the Local Minutes desktop shortcut, saved GPU profile and selected-engine startup. The commands below retain historical baseline/rollback context; they are not the recommended daily launcher.
+
 This is a qualification installation, not a finished Local Minutes release. The application still displays Scriberr branding, intentionally. Read PRODUCT_SPEC.md before making changes.
 
 ## Layout

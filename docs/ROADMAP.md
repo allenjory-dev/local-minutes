@@ -1,5 +1,11 @@
 # Roadmap
 
+## Current status - 2026-10-02
+
+The short-recording baseline, approved upload/logging safety fixes, and male-female/male-male public tests are complete within their documented limits. The user subsequently approved operational step 1: selected-engine startup, a desktop launcher and the tested saved GPU profile. See [DAILY_USE.md](DAILY_USE.md) for completed verification and the remaining actual-Windows-reboot check.
+
+The next proposed operational step is local summary configuration/verification, followed by portable session storage and Obsidian/LifeBot integration with explicit privacy controls. These are proposals, not permission to proceed. Android and redesign remain deferred. The sequence below preserves the original architectural roadmap; completed safety/startup items are not new outstanding requests.
+
 1. **Current: establish baseline.** Inspect existing system; assess source/license/alternatives; fork with develop; isolated installation; short audio, CUDA, diarization, playback, persistence and offline tests. Record failures honestly and stop for approval.
 2. **First recommended change, subject to approval:** preserve uploaded originals byte-for-byte and write conversions as derivatives, with hashes and a focused WebM regression test. This closes a concrete conflict with the product's core promise.
 3. Fix credential-bearing command logging before real Hugging Face credentials; pin engine/model/dependency revisions and make environment readiness truthful. Establish repeatable Windows installation and local-only inference.
