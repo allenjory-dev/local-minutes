@@ -83,6 +83,8 @@ Every other item stays `needs_review`, with flags for:
 
 Missing or placeholder owners and deadlines become `Not stated`. Matching words shows only that something was said, never that it is true or agreed. Exact match ignores case and punctuation, but not word choice: "I'll" does not match "I will", and "should" does not match "can". A quote may continue across adjacent segments, never non-adjacent ones.
 
+Numbers are the exception to "punctuation is ignored". Every symbol that can change a number stays part of it: a sign, comparison mark or currency sign before it, a leading point, any symbol between digits, and %, °, + or a currency sign after it. Such a symbol standing apart ("5 %") is kept as its own word. So "-5 kPa" does not match "+5 kPa" or "5 kPa", "1/2 inch" does not match "1.2 inch", ".5" does not match "5", and "Clause 7.2" does not match "Clause 7.2.3". The Unicode minus sign and dashes count as "-", and "½" counts as "1/2". Letters still split from digits, so "300mm" matches "300 mm".
+
 ## Schema, backup and rollback
 
 GORM AutoMigrate makes additive changes only:
@@ -120,12 +122,14 @@ Independent review ran the base-commit binary on a migrated database and confirm
 | Rendered UI (real router and built frontend, scripted Ollama stand-in, headless Chromium) | PASS for legacy draft notice, evidence-linked draft with flags/UNVERIFIED/speaker names/source times, an output-limit failure keeping the previous draft, free-form save and failure with partial text marked "not saved", model HTML shown as text, reopen, and phone width. The harness was not committed. |
 | Old handler, same synthetic burst (400 chunks then done) | Output lost in 38 of 40 runs, in both response and saved summary: the close-order race is real for fast streams. Real-world frequency on the GPU stream was not measured. New handler: 25 of 25 repeats complete. |
 | Independent code review (separate agent) | 11 findings. All fixed in `c99a790` with tests, except the documented limitations below. |
-| Real model / GPU / Windows | NOT RUN: requires Codex on the laptop |
+| Real model / GPU / Windows | Not run here. Reported by the independent review on the laptop: Windows build passed, all eight synthetic meetings produced local drafts, and the migration preserved existing data on a backup copy. It found the two problems fixed in the next row. |
+| Correction round: numeric quotes and an open test database | PASS: 304 passed, 0 failed. The new number cases fail with the previous tokenizer. On Linux, an open-file check now fails the database tests if a file is still open at the end. Built as Windows test binaries and run under Wine (not a real Windows install): the previous database test fails with the same "sharing violation" cleanup error; the fixed one passes, as do the summary, LLM and summary API suites. |
 
 ## Limitations
 
 - **Semantic accuracy is not solved.** The lexical checks miss differently phrased suggestions, commitments, refusals and corrections. Omissions cannot be detected. The overview is model-written and unchecked.
 - **No live-model verification.** Whether `local-minutes-summary:7b` returns valid schema-constrained JSON and useful candidates is untested. Prompt version `lm-grounded-2026-10-02` has not been qualified.
+- **Number formats must match exactly.** "1,200" and "1200", "5 %" and "5%", or "3.30" and "3:30" are reported as not found, and spelled-out numbers ("five") never match digits. These items need review rather than being matched wrongly.
 - **No long-meeting support.** Long meetings are rejected. The estimate is deliberately pessimistic (often 30-60% above actual for English), so some transcripts that would fit are rejected.
 - **OpenAI-compatible providers:** the context size and JSON schema are not sent, and usage is usually unreported. A server with a smaller context than 8,192 could still truncate input; it is only caught if the server reports an error.
 - **Reviewing is not implemented.** There are no accept/dismiss controls, so every item stays "needs review". Authoritative-source verification is not implemented either: technical claims stay UNVERIFIED with no way to change that, by design for now.
@@ -148,7 +152,7 @@ Independent review ran the base-commit binary on a migrated database and confirm
 
    Look for any path that saves or labels a failed result as completed, any content in logs, and any way to reach a verified or accepted state.
 3. **Run the automated checks on Windows.**
-   - `go test ./... -count=1`. Compare against the two known baseline failures.
+   - `go test ./... -count=1`. Compare against the two known baseline failures. The open-database cleanup failure in `internal/database` should be gone.
    - `go test -race` on `./internal/llm ./internal/summary ./internal/database ./tests` if a C toolchain exists.
    - In `web/frontend`: `npm ci`, `npx tsc -b`, `npx eslint src/features/transcription`, `npm run build`.
 4. **Build without replacing the running app.** Copy `web/frontend/dist` to `internal/web/dist`, then build a new executable name.
