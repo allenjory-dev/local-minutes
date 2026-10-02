@@ -444,21 +444,33 @@ func (w *WhisperXAdapter) Transcribe(ctx context.Context, input interfaces.Audio
 		logger.Debug("Updated LD_LIBRARY_PATH for WhisperX", "path", newPath)
 	}
 
-	cmd.Env = append(env, "PYTHONUNBUFFERED=1")
+	hfToken := w.GetStringParameter(params, "hf_token")
+	if hfToken == "" {
+		hfToken = os.Getenv("HF_TOKEN")
+	}
+	cmd.Env = append(withHFToken(env, hfToken), "PYTHONUNBUFFERED=1")
 
 	// Setup log file
 	logFile, err := os.OpenFile(filepath.Join(procCtx.OutputDirectory, "transcription.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	var output *secretOutput
 	if err != nil {
 		logger.Warn("Failed to create log file", "error", err)
 	} else {
 		defer logFile.Close()
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		output = &secretOutput{dst: logFile, secret: hfToken}
+		cmd.Stdout = output
+		cmd.Stderr = output
 	}
 
 	logger.Info("Executing WhisperX command", "args", strings.Join(args, " "))
 
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if output != nil {
+		if err := output.Flush(); err != nil {
+			return nil, fmt.Errorf("failed to flush transcription log: %w", err)
+		}
+	}
+	if err := runErr; err != nil {
 		if ctx.Err() == context.Canceled {
 			return nil, fmt.Errorf("transcription was cancelled")
 		}
@@ -557,14 +569,7 @@ func (w *WhisperXAdapter) buildWhisperXArgs(input interfaces.AudioInput, params 
 	args = append(args, "--beam_size", strconv.Itoa(w.GetIntParameter(params, "beam_size")))
 	args = append(args, "--patience", fmt.Sprintf("%.2f", w.GetFloatParameter(params, "patience")))
 
-	// HuggingFace token - use param first, then fall back to environment variable
-	hfToken := w.GetStringParameter(params, "hf_token")
-	if hfToken == "" {
-		hfToken = os.Getenv("HF_TOKEN")
-	}
-	if hfToken != "" {
-		args = append(args, "--hf_token", hfToken)
-	}
+	// Hugging Face reads HF_TOKEN from the child environment; never put it in argv.
 
 	// Disable print progress for cleaner output
 	args = append(args, "--print_progress", "False")

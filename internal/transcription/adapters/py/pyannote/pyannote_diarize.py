@@ -215,8 +215,8 @@ def main():
     )
     parser.add_argument(
         "--hf-token",
-        required=True,
-        help="Hugging Face access token"
+        default=os.environ.get("HF_TOKEN"),
+        help="Hugging Face access token (defaults to HF_TOKEN; prefer the environment)"
     )
     parser.add_argument(
         "--model",

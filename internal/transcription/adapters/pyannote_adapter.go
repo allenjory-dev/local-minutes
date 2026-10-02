@@ -298,8 +298,6 @@ func (p *PyAnnoteAdapter) Diarize(ctx context.Context, input interfaces.AudioInp
 	if hfToken == "" {
 		return nil, fmt.Errorf("HuggingFace token is required for PyAnnote diarization. Set HF_TOKEN environment variable or provide it in the UI")
 	}
-	// Store resolved token in params for buildPyAnnoteArgs
-	params["hf_token"] = hfToken
 
 	// Create temporary directory
 	tempDir, err := p.CreateTempDirectory(procCtx)
@@ -316,21 +314,29 @@ func (p *PyAnnoteAdapter) Diarize(ctx context.Context, input interfaces.AudioInp
 
 	// Execute PyAnnote
 	cmd := exec.CommandContext(ctx, "uv", args...)
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	cmd.Env = append(withHFToken(os.Environ(), hfToken), "PYTHONUNBUFFERED=1")
 
 	// Setup log file
 	logFile, err := os.OpenFile(filepath.Join(procCtx.OutputDirectory, "transcription.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	var output *secretOutput
 	if err != nil {
 		logger.Warn("Failed to create log file", "error", err)
 	} else {
 		defer logFile.Close()
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+		output = &secretOutput{dst: logFile, secret: hfToken}
+		cmd.Stdout = output
+		cmd.Stderr = output
 	}
 
 	logger.Info("Executing PyAnnote command", "args", strings.Join(args, " "))
 
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if output != nil {
+		if err := output.Flush(); err != nil {
+			return nil, fmt.Errorf("failed to flush transcription log: %w", err)
+		}
+	}
+	if err := runErr; err != nil {
 		if ctx.Err() == context.Canceled {
 			return nil, fmt.Errorf("diarization was cancelled")
 		}
@@ -379,7 +385,6 @@ func (p *PyAnnoteAdapter) buildPyAnnoteArgs(input interfaces.AudioInput, params 
 		"run", "--native-tls", "--project", p.envPath, "python", scriptPath,
 		input.FilePath,
 		"--output", outputFile,
-		"--hf-token", p.GetStringParameter(params, "hf_token"),
 	}
 
 	// Add model
