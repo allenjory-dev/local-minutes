@@ -1,11 +1,13 @@
 param(
     [string]$RuntimePath = (Join-Path $PSScriptRoot '../../../baseline-runtime'),
-    [string]$ShortcutDirectory = [Environment]::GetFolderPath('Desktop')
+    [string]$ShortcutDirectory = [Environment]::GetFolderPath('Desktop'),
+    [switch]$WithSummaries
 )
 $ErrorActionPreference = 'Stop'
 $runtime = (Resolve-Path -LiteralPath $RuntimePath).Path
 $directory = (Resolve-Path -LiteralPath $ShortcutDirectory).Path
 $launcher = Join-Path $PSScriptRoot 'Start-LocalMinutes.ps1'
+if ($WithSummaries) { $launcher = Join-Path $PSScriptRoot 'Start-LocalMinutesWithSummaries.ps1' }
 $powershell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 $shortcutPath = Join-Path $directory 'Local Minutes.lnk'
 $arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -RuntimePath "{1}" -ShowErrors' -f $launcher,$runtime
