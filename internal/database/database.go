@@ -74,6 +74,7 @@ func Initialize(dbPath string) error {
 		&models.SummaryTemplate{},
 		&models.SummarySetting{},
 		&models.Summary{},
+		&models.SummaryAttempt{},
 		&models.Note{},
 		&models.RefreshToken{},
 	); err != nil {

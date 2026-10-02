@@ -317,6 +317,15 @@ type SummaryRepository interface {
 	SaveSummary(ctx context.Context, summary *models.Summary) error
 	GetLatestSummary(ctx context.Context, transcriptionID string) (*models.Summary, error)
 	DeleteByTranscriptionID(ctx context.Context, transcriptionID string) error
+
+	// Generation attempts (Local Minutes). Attempts never replace summaries.
+	CreateAttempt(ctx context.Context, attempt *models.SummaryAttempt) error
+	SaveAttempt(ctx context.Context, attempt *models.SummaryAttempt) error
+	GetAttempt(ctx context.Context, id string) (*models.SummaryAttempt, error)
+	GetLatestAttempt(ctx context.Context, transcriptionID string) (*models.SummaryAttempt, error)
+	// SaveCompletedSummary stores a completed summary, links and saves its
+	// attempt and refreshes the job's cached summary in one transaction.
+	SaveCompletedSummary(ctx context.Context, summary *models.Summary, attempt *models.SummaryAttempt) error
 }
 
 type summaryRepository struct {
@@ -358,7 +367,48 @@ func (r *summaryRepository) GetLatestSummary(ctx context.Context, transcriptionI
 }
 
 func (r *summaryRepository) DeleteByTranscriptionID(ctx context.Context, transcriptionID string) error {
+	if err := r.db.WithContext(ctx).Where("transcription_id = ?", transcriptionID).Delete(&models.SummaryAttempt{}).Error; err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Where("transcription_id = ?", transcriptionID).Delete(&models.Summary{}).Error
+}
+
+func (r *summaryRepository) CreateAttempt(ctx context.Context, attempt *models.SummaryAttempt) error {
+	return r.db.WithContext(ctx).Create(attempt).Error
+}
+
+func (r *summaryRepository) SaveAttempt(ctx context.Context, attempt *models.SummaryAttempt) error {
+	return r.db.WithContext(ctx).Save(attempt).Error
+}
+
+func (r *summaryRepository) GetAttempt(ctx context.Context, id string) (*models.SummaryAttempt, error) {
+	var attempt models.SummaryAttempt
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&attempt).Error; err != nil {
+		return nil, err
+	}
+	return &attempt, nil
+}
+
+func (r *summaryRepository) GetLatestAttempt(ctx context.Context, transcriptionID string) (*models.SummaryAttempt, error) {
+	var attempt models.SummaryAttempt
+	err := r.db.WithContext(ctx).Where("transcription_id = ?", transcriptionID).Order("created_at DESC").First(&attempt).Error
+	if err != nil {
+		return nil, err
+	}
+	return &attempt, nil
+}
+
+func (r *summaryRepository) SaveCompletedSummary(ctx context.Context, summary *models.Summary, attempt *models.SummaryAttempt) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(summary).Error; err != nil {
+			return err
+		}
+		attempt.SummaryID = &summary.ID
+		if err := tx.Save(attempt).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.TranscriptionJob{}).Where("id = ?", summary.TranscriptionID).Update("summary", summary.Content).Error
+	})
 }
 
 // ChatRepository handles chat sessions and messages

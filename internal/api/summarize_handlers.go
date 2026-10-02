@@ -1,15 +1,16 @@
 package api
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os"
 	"strings"
-	"time"
 
 	"scriberr/internal/llm"
 	"scriberr/internal/models"
+	"scriberr/internal/summary"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -22,15 +23,22 @@ type SummarizeRequest struct {
 	TemplateID      *string `json:"template_id,omitempty"`
 }
 
-// Summarize streams LLM output for a given content prompt
-// @Summary Summarize content
-// @Description Stream an LLM-generated summary for provided content; persists latest summary for the transcription
+// summaryAttemptHeader carries the attempt ID of a streamed free-form summary.
+// The stream itself cannot report failure after the 200 status is sent, so
+// clients must read the attempt to learn whether the text was saved.
+const summaryAttemptHeader = "X-Summary-Attempt-Id"
+
+// Summarize streams a free-form LLM summary for client-supplied content.
+// @Summary Summarize content (free-form, no evidence checks)
+// @Description Streams model text. The response header X-Summary-Attempt-Id identifies the attempt; fetch /api/v1/transcription/{id}/summary/attempts/{attempt_id} after the stream ends. Text is saved only if the provider confirms completion; failed, cancelled, truncated or empty generations are recorded as attempts and never replace a saved summary.
 // @Tags summarize
 // @Accept json
-// @Produce text/event-stream
+// @Produce text/plain
 // @Param request body SummarizeRequest true "Summarize request"
-// @Success 200 {string} string "Event stream"
+// @Success 200 {string} string "Streamed model text"
 // @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 413 {object} map[string]interface{}
 // @Failure 500 {object} map[string]string
 // @Security ApiKeyAuth
 // @Security BearerAuth
@@ -41,157 +49,135 @@ func (h *Handler) Summarize(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	ctx := c.Request.Context()
 
-	svc, provider, err := h.getLLMService(c.Request.Context())
+	if _, err := h.jobRepo.FindByID(ctx, req.TranscriptionID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Transcription not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load transcription"})
+		return
+	}
+	limits, err := summary.LimitsFromEnv(os.Getenv)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid summary limit configuration: " + err.Error()})
+		return
+	}
+	svc, provider, err := h.getLLMService(ctx)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	streamer, ok := svc.(llm.OutcomeStreamer)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "The configured provider cannot report whether generation completed"})
+		return
+	}
 
-	// Prepare chat messages: simple single-user message with full content
 	messages := []llm.ChatMessage{{Role: "user", Content: req.Content}}
+	attempt := newSummaryAttempt(req.TranscriptionID, req.TemplateID, summary.ModeFreeform, provider, req.Model, limits)
+	check := limits.CheckInput(messages)
+	attempt.InputTokensEstimate = check.EstimatedTokens
+	if !check.Fits {
+		h.recordRejectedAttempt(attempt, inputTooLarge(check))
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": attempt.Detail, "attempt": attempt})
+		return
+	}
 
-	start := time.Now()
-	log.Printf("[summarize] start transcription_id=%s provider=%s model=%s content_len=%d", req.TranscriptionID, provider, req.Model, len(req.Content))
+	activeSummaryAttempts.add(attempt.ID)
+	defer activeSummaryAttempts.remove(attempt.ID)
+	if err := h.summaryRepo.CreateAttempt(ctx, attempt); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record summary attempt"})
+		return
+	}
+	logAttemptStart(attempt, check, 0)
 
-	// Stream response with proper headers for real-time delivery
+	c.Header(summaryAttemptHeader, attempt.ID)
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
 	c.Header("X-Accel-Buffering", "no") // Disable nginx buffering
-	c.Status(http.StatusOK)             // Start response immediately
+	c.Status(http.StatusOK)
 
-	h.processSummarization(c, req, svc, messages, start)
-}
-
-func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, start time.Time) {
-	// Allow longer generation time for large transcripts and smaller models
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Minute)
+	genCtx, cancel := context.WithTimeout(ctx, summaryGenerationTimeout)
 	defer cancel()
-
-	contentChan, errChan := svc.ChatCompletionStream(ctx, req.Model, messages, 0.0)
-	flusher, _ := c.Writer.(http.Flusher)
-	writer := bufio.NewWriter(c.Writer)
-
-	finalText := ""
-	gotFirstChunk := false
-
-	// Loop handles one chunk/error at a time
-	for {
-		select {
-		case chunk, ok := <-contentChan:
-			if !ok {
-				writer.Flush()
-				if flusher != nil {
-					flusher.Flush()
-				}
-				// Persist summary once streaming completes
-				h.persistSummary(req, finalText)
-				log.Printf("[summarize] complete transcription_id=%s model=%s bytes=%d duration_ms=%d", req.TranscriptionID, req.Model, len(finalText), time.Since(start).Milliseconds())
-				return
-			}
-			finalText += chunk
-			_, _ = writer.WriteString(chunk)
-			writer.Flush()
-			if flusher != nil {
-				flusher.Flush()
-			}
-			if !gotFirstChunk && len(chunk) > 0 {
-				gotFirstChunk = true
-				log.Printf("[summarize] first_chunk transcription_id=%s model=%s at_ms=%d", req.TranscriptionID, req.Model, time.Since(start).Milliseconds())
-			}
-		case err := <-errChan:
-			if err != nil {
-				h.handleSummarizeError(c, req, svc, messages, err, finalText, start)
-			}
-			// Persist any partial content on error
-			h.persistSummary(req, finalText)
-			return
-		case <-ctx.Done():
-			// Persist any partial content on timeout/cancel
-			h.persistSummary(req, finalText)
-			log.Printf("[summarize] timeout/cancel transcription_id=%s model=%s bytes=%d duration_ms=%d", req.TranscriptionID, req.Model, len(finalText), time.Since(start).Milliseconds())
-			return
+	var output strings.Builder
+	write := func(delta string) error {
+		if output.Len()+len(delta) > maxSummaryOutputBytes {
+			return errSummaryOutputTooLarge
 		}
+		output.WriteString(delta)
+		if _, err := c.Writer.WriteString(delta); err != nil {
+			return err
+		}
+		c.Writer.Flush()
+		return nil
 	}
-}
+	outcome := streamer.StreamWithOutcome(genCtx, req.Model, messages, limits.GenerationOptions(), write)
 
-func (h *Handler) handleSummarizeError(c *gin.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, err error, partialText string, start time.Time) {
-	flusher, _ := c.Writer.(http.Flusher)
-	writer := bufio.NewWriter(c.Writer)
+	// Upstream fallback for OpenAI models/organisations that cannot stream.
+	if llm.IsStreamingUnsupported(outcome.Err) && output.Len() == 0 {
+		outcome = nonStreamingFallback(genCtx, svc, req.Model, messages, write)
+	}
 
-	// Best-effort error signal
-	// If streaming is unsupported for this model/org, fall back to non-streaming
-	errStr := err.Error()
-	if strings.Contains(errStr, "\"param\": \"stream\"") || strings.Contains(errStr, "unsupported_value") || strings.Contains(errStr, "must be verified to stream") {
-		log.Printf("[summarize] falling back to non-streaming transcription_id=%s model=%s due to: %v", req.TranscriptionID, req.Model, err)
-		resp, err2 := svc.ChatCompletion(c.Request.Context(), req.Model, messages, 0.0)
-		if err2 != nil || resp == nil || len(resp.Choices) == 0 {
-			log.Printf("[summarize] fallback failed transcription_id=%s model=%s err=%v", req.TranscriptionID, req.Model, err2)
-			_, _ = c.Writer.Write([]byte("\n"))
-			writer.Flush()
-			if flusher != nil {
-				flusher.Flush()
-			}
-			return
-		}
-		content := resp.Choices[0].Message.Content
-		// Write content (appended to partial if any, though likely partial is empty if stream failed immediately)
-		_, _ = writer.WriteString(content)
-		writer.Flush()
-		if flusher != nil {
-			flusher.Flush()
-		}
-		// We should persist the FULL text (partial + fallback), but partialText is passed by value.
-		// However, handleSumarizeError doesn't update partialText in caller.
-		// The caller calls persistSummary(req, finalText) after this function returns.
-		// So we actually need to persist here if we succeed?
-		// Or return the new text?
-		// Since we can't easily update finalText in caller without pointer, let's persist here if success.
-		h.persistSummary(req, partialText+content)
-		log.Printf("[summarize] fallback complete transcription_id=%s model=%s bytes=%d duration_ms=%d", req.TranscriptionID, req.Model, len(partialText+content), time.Since(start).Milliseconds())
-
-		// To avoid double persistence in caller (which uses stale finalText), we need a way to signal "done".
-		// But caller persists anyway.
-		// It's acceptable to double-persist (idempotent updates usually) or just accept that caller persists partial and we persist full.
+	cls := classifyGeneration(outcome, output.String(), limits)
+	recordOutcomeMetrics(attempt, outcome, output.Len())
+	if !cls.Completed() {
+		h.finishAttempt(attempt, cls)
+		logAttemptEnd(attempt)
 		return
 	}
-	_, _ = c.Writer.Write([]byte("\n"))
-	writer.Flush()
-	if flusher != nil {
-		flusher.Flush()
+
+	saved := &models.Summary{
+		TranscriptionID:  req.TranscriptionID,
+		TemplateID:       req.TemplateID,
+		Model:            req.Model,
+		Provider:         provider,
+		Content:          output.String(),
+		GenerationStatus: summary.StatusCompleted,
+		Format:           summary.ModeFreeform,
+		AttemptID:        &attempt.ID,
 	}
-	log.Printf("[summarize] error transcription_id=%s model=%s err=%v duration_ms=%d", req.TranscriptionID, req.Model, err, time.Since(start).Milliseconds())
+	h.saveCompleted(saved, attempt)
+	logAttemptEnd(attempt)
 }
 
-func (h *Handler) persistSummary(req SummarizeRequest, content string) {
-	if req.TranscriptionID == "" || content == "" {
-		return
+// nonStreamingFallback runs one non-streaming completion and converts it into
+// an outcome. Only OpenAI reports a finish reason here.
+func nonStreamingFallback(ctx context.Context, svc llm.Service, model string, messages []llm.ChatMessage, write func(string) error) llm.StreamOutcome {
+	resp, err := svc.ChatCompletion(ctx, model, messages, 0.0)
+	if err != nil {
+		if ctx.Err() != nil {
+			return llm.StreamOutcome{Err: ctx.Err()}
+		}
+		// The upstream error text includes the provider body; keep it out.
+		return llm.StreamOutcome{Err: &llm.ProviderError{Message: "non-streaming fallback request failed"}}
 	}
-	sum := &models.Summary{
-		TranscriptionID: req.TranscriptionID,
-		TemplateID:      req.TemplateID,
-		Model:           req.Model,
-		Content:         content,
+	out := llm.StreamOutcome{Completed: true}
+	if resp == nil || len(resp.Choices) == 0 {
+		return out
 	}
-	if err := h.summaryRepo.SaveSummary(context.Background(), sum); err != nil {
-		// Fallback: store on the transcription job record
-		_ = h.jobRepo.UpdateSummary(context.Background(), req.TranscriptionID, content)
-	} else {
-		// Also cache on the transcription job for quick access
-		_ = h.jobRepo.UpdateSummary(context.Background(), req.TranscriptionID, content)
+	out.FinishReason = resp.Choices[0].FinishReason
+	out.PromptTokens = resp.Usage.PromptTokens
+	out.OutputTokens = resp.Usage.CompletionTokens
+	if content := resp.Choices[0].Message.Content; content != "" {
+		if err := write(content); err != nil {
+			return llm.StreamOutcome{Err: errors.Join(llm.ErrDeltaRejected, err)}
+		}
 	}
+	return out
 }
 
-// GetSummaryForTranscription returns the latest summary for a transcription
+// GetSummaryForTranscription returns the latest saved summary with its
+// application-assigned status and the latest generation attempt.
 // @Summary Get latest summary for transcription
-// @Description Get the most recent saved summary for the given transcription
+// @Description Returns the most recent saved summary (or an empty one), always labelled as an unverified AI draft, with generation status, evidence-linked draft data when available, whether the transcript changed since generation, and the most recent generation attempt (which may have failed without replacing the saved summary).
 // @Tags summarize
 // @Produce json
 // @Param id path string true "Transcription ID"
-// @Success 200 {object} models.Summary
-// @Failure 404 {object} map[string]string
+// @Success 200 {object} SummaryView
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security ApiKeyAuth
@@ -203,35 +189,63 @@ func (h *Handler) GetSummaryForTranscription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Transcription ID required"})
 		return
 	}
-	s, err := h.summaryRepo.GetLatestSummary(c.Request.Context(), tid)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// Fallback: check if summary is cached on the job record
-			job, err2 := h.jobRepo.FindByID(c.Request.Context(), tid)
-			if err2 == nil && job.Summary != nil && *job.Summary != "" {
-				c.JSON(http.StatusOK, gin.H{
-					"transcription_id": tid,
-					"template_id":      nil,
-					"model":            "",
-					"content":          *job.Summary,
-					"created_at":       job.UpdatedAt,
-					"updated_at":       job.UpdatedAt,
-				})
-				return
-			}
-			// Return empty summary instead of 404 for graceful frontend handling
-			c.JSON(http.StatusOK, gin.H{
-				"transcription_id": tid,
-				"template_id":      nil,
-				"model":            "",
-				"content":          "",
-				"created_at":       nil,
-				"updated_at":       nil,
-			})
-			return
-		}
+	ctx := c.Request.Context()
+	view := &SummaryView{
+		TranscriptionID:  tid,
+		GenerationStatus: summary.StatusNone,
+		DraftStatus:      summary.DraftStatus,
+		DraftNotice:      summary.DraftNotice,
+	}
+
+	job, jobErr := h.jobRepo.FindByID(ctx, tid)
+	if jobErr != nil && !errors.Is(jobErr, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch summary"})
 		return
 	}
-	c.JSON(http.StatusOK, s)
+	if jobErr != nil {
+		job = nil
+	}
+
+	s, err := h.summaryRepo.GetLatestSummary(ctx, tid)
+	switch {
+	case err == nil:
+		fillSummaryView(view, s, job)
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		// Fallback: an older version may have cached a summary on the job only.
+		if job != nil && job.Summary != nil && *job.Summary != "" {
+			updated := job.UpdatedAt
+			view.Content = *job.Summary
+			view.CreatedAt = &updated
+			view.UpdatedAt = &updated
+			view.GenerationStatus = summary.StatusLegacy
+			view.Format = summary.FormatLegacy
+			view.DraftNotice = summary.DraftNotice + " " + summary.LegacyNotice
+		}
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch summary"})
+		return
+	}
+
+	if attempt, err := h.summaryRepo.GetLatestAttempt(ctx, tid); err == nil {
+		view.LatestAttempt = h.reconcileStaleAttempt(attempt)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch summary attempts"})
+		return
+	}
+	c.JSON(http.StatusOK, view)
+}
+
+func logAttemptStart(a *models.SummaryAttempt, check summary.InputCheck, segments int) {
+	// Metadata only: never transcript text, prompts, model output or provider messages.
+	log.Printf("[summary] start attempt=%s transcription=%s mode=%s provider=%s model=%s est_input_tokens=%d budget=%d segments=%d",
+		a.ID, a.TranscriptionID, a.Mode, a.Provider, a.Model, check.EstimatedTokens, check.BudgetTokens, segments)
+}
+
+func logAttemptEnd(a *models.SummaryAttempt) {
+	duration := int64(0)
+	if a.FinishedAt != nil {
+		duration = a.FinishedAt.Sub(a.StartedAt).Milliseconds()
+	}
+	log.Printf("[summary] end attempt=%s transcription=%s mode=%s status=%s reason=%s finish_reason=%s output_chars=%d prompt_tokens=%d output_tokens=%d duration_ms=%d",
+		a.ID, a.TranscriptionID, a.Mode, a.Status, a.Reason, a.FinishReason, a.OutputChars, a.PromptTokens, a.OutputTokens, duration)
 }
