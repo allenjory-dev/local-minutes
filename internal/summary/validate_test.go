@@ -305,6 +305,70 @@ func TestQuoteMatchingRules(t *testing.T) {
 	assert.Equal(t, []string{"300", "mm", "clearance"}, words("300mm clearance"))
 }
 
+// Found by review: "-5 kPa" matched "+5 kPa" and "1/2 inch" matched "1.2 inch"
+// because signs and number separators were dropped as punctuation. A quote
+// that changes a number must never count as found.
+func TestQuoteMatchingKeepsNumbersExact(t *testing.T) {
+	cases := []struct {
+		segment, quote string
+		want           bool
+	}{
+		{"Set the regulator to -5 kPa.", "+5 kPa", false},
+		{"Set the regulator to -5 kPa.", "to 5 kPa", false},
+		{"Set the regulator to -5 kPa.", "the regulator to 5", false},
+		{"Set the regulator to +5 kPa.", "-5 kPa", false},
+		{"Set the regulator to -5 kPa.", "-5 kPa", true},
+		{"Set the regulator to -5 kPa.", "to \u22125 kPa", true}, // Unicode minus sign
+		{"Use a 1/2 inch line.", "a 1.2 inch line", false},
+		{"Use a 1.2 inch line.", "a 1/2 inch line", false},
+		{"Use a 1.2 inch line.", "a 12 inch line", false},
+		{"Use a 1/2 inch line.", "a \u00bd inch line", true}, // "½"
+		{"Use a 1\u00bd inch line.", "a 1 1/2 inch line", true},
+		{"Use a 1\u00bd inch line.", "a 11/2 inch line", false},
+		{"Leave a .5 inch gap.", "a 5 inch gap", false},
+		{"Clause 7.2.3 applies here.", "Clause 7.2 applies", false},
+		{"Clause 7.2.3 applies here.", "clause 7.2.3 applies", true},
+		{"Order 1,200 litres.", "Order 1200 litres", false},
+		{"Order 1.200 litres.", "Order 1,200 litres", false},
+		{"A 5% slope.", "A 5 slope", false},
+		{"A 5 % slope.", "A 5 slope", false},
+		{"Keep it under 5 kPa.", "under <5 kPa", false},
+		{"The budget is $500.", "The budget is €500", false},
+		{"Plan for 5+ years.", "Plan for 5 years", false},
+		{"Between 5\u201310 kPa.", "between 5-10 kPa", true}, // en dash range
+		{"Meet at 3:30 then.", "meet at 3:30", true},
+		{"Allow 300mm clearance.", "allow 300 mm clearance", true},
+		{"Set it to 5.", "set it to 5", true},
+	}
+	for _, tc := range cases {
+		seg := Segment{ID: "S1", Speaker: "SPEAKER_00", Text: tc.segment}
+		got, _ := matchInRuns(quoteParts(tc.quote), []Segment{seg})
+		assert.Equal(t, tc.want, got, "quote %q in segment %q", tc.quote, tc.segment)
+	}
+
+	assert.Equal(t, []string{"-5", "kpa"}, words("\u22125 kPa"))
+	assert.Equal(t, []string{"1/2", "inch"}, words("\u00bd inch"))
+	assert.Equal(t, []string{"clause", "7.2.3", "b"}, words("Clause 7.2.3(b)."))
+	assert.Equal(t, []string{"5", "year", "old", "covid", "19"}, words("5-year-old COVID-19"), "hyphens next to letters are not signs")
+	assert.Equal(t, []string{"between", "-5", "and", "-10"}, words("between -5 and -10"))
+
+	raw := `{"segments":[
+		{"start":0,"end":4,"text":"Set the regulator to -5 kPa.","speaker":"SPEAKER_00"},
+		{"start":4,"end":6,"text":"Okay.","speaker":"SPEAKER_01"}]}`
+	tr, err := ParseStoredTranscript(raw)
+	require.NoError(t, err)
+	cands, _ := Validate(&RawDraft{Items: []RawItem{
+		{Kind: KindTechnicalClaim, Text: "Regulator setting", SegmentIDs: []string{"S1"}, Quote: "Set the regulator to +5 kPa"},
+		{Kind: KindTechnicalClaim, Text: "Regulator setting", SegmentIDs: []string{"S1"}, Quote: "Set the regulator to -5 kPa"},
+	}}, tr)
+	require.Len(t, cands, 2)
+	assert.False(t, cands[0].QuoteMatched, "a changed sign is not the transcript's quote")
+	assert.Contains(t, flagCodes(cands[0]), FlagQuoteNotInCitedSegments)
+	assert.Equal(t, VerificationUnverified, cands[0].VerificationStatus)
+	assert.True(t, cands[1].QuoteMatched)
+	assert.Equal(t, VerificationUnverified, cands[1].VerificationStatus, "a matched quote still proves only that it was said")
+}
+
 // Cases found by independent review: quotes that hide a refusal or question,
 // verbatim deadlines and owners borrowed from a neighbouring cited segment.
 func TestReviewFoundEvasions(t *testing.T) {

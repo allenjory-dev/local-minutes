@@ -13,45 +13,136 @@ import (
 // ignored; spelling and word order are not, so "I'll" never matches "I will".
 // Letter/digit boundaries split words ("300mm" -> "300", "mm") so ASR spacing
 // differences do not decide a match.
+//
+// Numbers are the exception to "punctuation is ignored": every symbol that can
+// change a number's meaning stays part of it (see numberEnd), so "-5" never
+// matches "+5" or "5", "1/2" never matches "1.2", and "7.2" never matches part
+// of "7.2.3". Such a symbol standing on its own ("5 %") is kept as a word.
 func words(s string) []string {
-	s = norm.NFKC.String(s)
-	s = strings.NewReplacer("’", "'", "‘", "'", "ʼ", "'", "`", "'", "´", "'").Replace(s)
-	s = strings.ToLower(s)
+	rs := []rune(strings.ToLower(normalizeText(s)))
 	var out []string
-	var cur []rune
-	flush := func() {
-		if len(cur) > 0 {
-			if w := strings.Trim(string(cur), "'"); w != "" {
-				out = append(out, w)
-			}
-			cur = cur[:0]
-		}
-	}
-	for _, r := range s {
-		isLetter := unicode.IsLetter(r) || r == '\''
-		isDigit := unicode.IsDigit(r)
-		if !isLetter && !isDigit {
-			flush()
+	for i := 0; i < len(rs); {
+		if end := numberEnd(rs, i); end > i {
+			out = append(out, string(rs[i:end]))
+			i = end
 			continue
 		}
-		if len(cur) > 0 {
-			prevDigit := unicode.IsDigit(cur[len(cur)-1])
-			if prevDigit != isDigit {
-				flush()
+		if unicode.IsLetter(rs[i]) || rs[i] == '\'' {
+			j := i + 1
+			for j < len(rs) && (unicode.IsLetter(rs[j]) || rs[j] == '\'') {
+				j++
 			}
+			if w := strings.Trim(string(rs[i:j]), "'"); w != "" {
+				out = append(out, w)
+			}
+			i = j
+			continue
 		}
-		cur = append(cur, r)
+		if isNumberSymbol(rs[i]) {
+			out = append(out, string(rs[i])) // "5 %" keeps its "%"; see isNumberSymbol
+		}
+		i++
 	}
-	flush()
 	return out
+}
+
+var textReplacer = strings.NewReplacer(
+	"\u2019", "'", "\u2018", "'", "\u02bc", "'", "`", "'", "\u00b4", "'", // apostrophes
+	"\u2010", "-", "\u2012", "-", "\u2013", "-", "\u2014", "-", "\u2015", "-", // dashes
+	"\u2212", "-", // minus sign
+	"\u2044", "/", // fraction slash
+)
+
+// normalizeText applies the compatibility normalization used for every
+// comparison: "…" becomes "...", "½" becomes "1/2", the minus sign and dashes
+// become "-", and curly apostrophes become straight ones. Superscripts and
+// vulgar fractions are spaced first so normalization cannot fuse them with a
+// neighbouring number ("10²" is not "102", "5½" is not "51/2").
+func normalizeText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.Is(unicode.No, r) {
+			b.WriteByte(' ')
+			b.WriteRune(r)
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return textReplacer.Replace(norm.NFKC.String(b.String()))
+}
+
+const (
+	// numberSigns start a number only when no letter, digit or point comes
+	// directly before them, so "x-5" and "5-10" are not negative numbers.
+	numberSigns = "+-±∓"
+	// numberMarks before a number always belong to it ("<5", "~5").
+	numberMarks = "<>≤≥≈~"
+	// numberSuffixes directly after a number belong to it ("5%", "5°", "5+").
+	numberSuffixes = "%‰°+\u2032\u2033" // the last two are prime and double prime
+)
+
+// numberEnd returns the end of the number that starts at rs[i], or i when no
+// number starts there. A number keeps every symbol that can change its value
+// or meaning:
+//   - signs, comparison marks and currency symbols directly before it ("-5",
+//     "+5", "<5", "$5") and a leading decimal point (".5");
+//   - any symbol between two digits ("1/2", "1.2", "1,200", "7.2.3", "3:30",
+//     "5-10");
+//   - a percent, degree, plus, prime or currency sign directly after it
+//     ("5%", "5°", "5+", "5€").
+//
+// Sentence punctuation after a number ("5.", "5,", "5)") is not kept, and
+// letters always split from digits.
+func numberEnd(rs []rune, i int) int {
+	afterWord := i > 0 && (unicode.IsLetter(rs[i-1]) || unicode.IsDigit(rs[i-1]) || rs[i-1] == '.')
+	j := i
+	for j < len(rs) && (isCurrency(rs[j]) || strings.ContainsRune(numberMarks, rs[j]) ||
+		(!afterWord && strings.ContainsRune(numberSigns, rs[j]))) {
+		j++
+	}
+	if j+1 < len(rs) && rs[j] == '.' && unicode.IsDigit(rs[j+1]) && !(j == i && afterWord) {
+		j++
+	}
+	if j >= len(rs) || !unicode.IsDigit(rs[j]) {
+		return i
+	}
+	for j < len(rs) {
+		if unicode.IsDigit(rs[j]) {
+			j++
+		} else if j+1 < len(rs) && isNumberJoiner(rs[j]) && unicode.IsDigit(rs[j+1]) {
+			j += 2
+		} else {
+			break
+		}
+	}
+	for j < len(rs) && (strings.ContainsRune(numberSuffixes, rs[j]) || isCurrency(rs[j])) {
+		j++
+	}
+	return j
+}
+
+func isCurrency(r rune) bool { return unicode.Is(unicode.Sc, r) }
+
+// isNumberSymbol reports a symbol that changes the meaning of a nearby number.
+// Attached to a number it is part of that number's word; standing apart
+// ("5 %", "$ 5") it is a word of its own, so a quote can never add or drop it
+// unnoticed. The hyphen is left out because it is far more often a dash.
+func isNumberSymbol(r rune) bool {
+	return r != '-' && (isCurrency(r) || strings.ContainsRune(numberSigns+numberMarks+numberSuffixes, r))
+}
+
+// isNumberJoiner reports a symbol that, between two digits, is part of the
+// number: anything that is not a letter, digit or space.
+func isNumberJoiner(r rune) bool {
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsSpace(r)
 }
 
 // quoteParts splits a quotation at ellipses. Each part must appear, in order,
 // in the cited text. Empty parts (a leading or trailing "...") are dropped.
 func quoteParts(quote string) [][]string {
-	q := norm.NFKC.String(quote) // "…" becomes "..."
 	var parts [][]string
-	for _, p := range strings.Split(q, "...") {
+	for _, p := range strings.Split(normalizeText(quote), "...") {
 		if w := words(p); len(w) > 0 {
 			parts = append(parts, w)
 		}
