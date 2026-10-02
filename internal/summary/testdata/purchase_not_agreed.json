@@ -1,0 +1,33 @@
+{
+  "description": "A proposed purchase that was explicitly refused.",
+  "transcript": {
+    "text": "I think we should buy the new pressure tester before the next inspection. No. We are not buying that this quarter, there is no budget for it. Fine, we'll revisit it next quarter.",
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 5.1, "text": "I think we should buy the new pressure tester before the next inspection.", "speaker": "SPEAKER_00"},
+      {"start": 5.6, "end": 9.8, "text": "No. We are not buying that this quarter, there is no budget for it.", "speaker": "SPEAKER_01"},
+      {"start": 10.2, "end": 12.4, "text": "Fine, we'll revisit it next quarter.", "speaker": "SPEAKER_00"}
+    ]
+  },
+  "model_outputs": {
+    "proposal_as_decision": {
+      "overview": "Equipment purchasing was discussed.",
+      "items": [
+        {"kind": "decision", "text": "Buy the new pressure tester", "segment_ids": ["S1"], "quote": "we should buy the new pressure tester", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "before the next inspection"}
+      ]
+    },
+    "refusal_as_commitment": {
+      "overview": "Equipment purchasing was discussed.",
+      "items": [
+        {"kind": "commitment", "text": "Buy the pressure tester this quarter", "segment_ids": ["S2"], "quote": "We are not buying that this quarter", "speaker": "SPEAKER_01", "owner": "SPEAKER_01", "due": "this quarter"}
+      ]
+    },
+    "correct": {
+      "overview": "A proposed equipment purchase was not agreed and will be revisited.",
+      "items": [
+        {"kind": "suggestion", "text": "Buy a new pressure tester (not agreed: no budget this quarter)", "segment_ids": ["S1", "S2"], "quote": "we should buy the new pressure tester before the next inspection", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated"},
+        {"kind": "decision", "text": "Revisit the purchase next quarter", "segment_ids": ["S3"], "quote": "we'll revisit it next quarter", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "next quarter"}
+      ]
+    }
+  }
+}

@@ -61,6 +61,10 @@ type OutcomeStreamer interface {
 // when the client connection has gone away.
 var ErrDeltaRejected = errors.New("stream consumer stopped accepting output")
 
+// ErrProviderUnreachable wraps a failure to connect to or send the request to
+// the provider (for example the local model server is not running).
+var ErrProviderUnreachable = errors.New("model provider could not be reached")
+
 // ProviderError is an error reported by the model provider, either as an HTTP
 // status or inside the stream. Error() deliberately omits Message: providers
 // may echo request content, so the message must not reach application logs.

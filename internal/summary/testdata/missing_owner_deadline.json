@@ -1,0 +1,25 @@
+{
+  "description": "A team commitment with no named owner and no deadline.",
+  "transcript": {
+    "text": "The mechanical drawings need to be updated before resubmission. Yes, we will update the drawings.",
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 3.5, "text": "The mechanical drawings need to be updated before resubmission.", "speaker": "SPEAKER_00"},
+      {"start": 3.9, "end": 6.0, "text": "Yes, we will update the drawings.", "speaker": "SPEAKER_01"}
+    ]
+  },
+  "model_outputs": {
+    "blank_fields": {
+      "overview": "Drawing updates were discussed.",
+      "items": [
+        {"kind": "commitment", "text": "Update the mechanical drawings", "segment_ids": ["S2"], "quote": "we will update the drawings", "speaker": "SPEAKER_01", "owner": "", "due": "N/A"}
+      ]
+    },
+    "invented_owner_and_date": {
+      "overview": "Drawing updates were discussed.",
+      "items": [
+        {"kind": "commitment", "text": "Update the mechanical drawings", "segment_ids": ["S2"], "quote": "we will update the drawings", "speaker": "SPEAKER_01", "owner": "Dave", "due": "2026-10-09"}
+      ]
+    }
+  }
+}

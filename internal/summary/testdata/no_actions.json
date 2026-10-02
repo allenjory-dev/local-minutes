@@ -1,0 +1,18 @@
+{
+  "description": "Small talk with no decisions, commitments or technical claims.",
+  "transcript": {
+    "text": "Morning! How was the long weekend? Great, we went camping near Canmore. Nice, the weather was perfect for it.",
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 2.5, "text": "Morning! How was the long weekend?", "speaker": "SPEAKER_00"},
+      {"start": 3.0, "end": 6.5, "text": "Great, we went camping near Canmore.", "speaker": "SPEAKER_01"},
+      {"start": 7.0, "end": 9.0, "text": "Nice, the weather was perfect for it.", "speaker": "SPEAKER_00"}
+    ]
+  },
+  "model_outputs": {
+    "correct": {
+      "overview": "Two people chatted about a camping trip over the long weekend.",
+      "items": []
+    }
+  }
+}

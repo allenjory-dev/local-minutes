@@ -335,7 +335,7 @@ func (s *OpenAIService) StreamWithOutcome(ctx context.Context, model string, mes
 			out.Err = ctxErr
 			return out
 		}
-		out.Err = fmt.Errorf("failed to reach provider: %w", err)
+		out.Err = fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
 		return out
 	}
 	defer resp.Body.Close()

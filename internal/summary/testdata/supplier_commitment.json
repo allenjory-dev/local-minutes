@@ -1,0 +1,34 @@
+{
+  "description": "Explicit first-person commitment versus an unassigned suggestion.",
+  "transcript": {
+    "text": "Okay, the valve delivery is late again. I will call the supplier by Friday about the delivery date. Someone should check whether the permit covers the new layout. Sounds good.",
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 4.2, "text": " Okay, the valve delivery is late again.", "speaker": "SPEAKER_00"},
+      {"start": 4.2, "end": 8.9, "text": " I will call the supplier by Friday about the delivery date.", "speaker": "SPEAKER_00"},
+      {"start": 9.3, "end": 14.0, "text": " Someone should check whether the permit covers the new layout.", "speaker": "SPEAKER_01"},
+      {"start": 14.5, "end": 16.0, "text": " Sounds good.", "speaker": "SPEAKER_00"}
+    ]
+  },
+  "model_outputs": {
+    "correct": {
+      "overview": "The late valve delivery and the permit scope were discussed.",
+      "items": [
+        {"kind": "commitment", "text": "Call the supplier about the delivery date", "segment_ids": ["S2"], "quote": "I will call the supplier by Friday", "speaker": "SPEAKER_00", "owner": "SPEAKER_00", "due": "Friday"},
+        {"kind": "suggestion", "text": "Check whether the permit covers the new layout", "segment_ids": ["S3"], "quote": "Someone should check whether the permit covers the new layout", "speaker": "SPEAKER_01", "owner": "Not stated", "due": "Not stated"}
+      ]
+    },
+    "suggestion_promoted_to_commitment": {
+      "overview": "Delivery and permit follow-ups.",
+      "items": [
+        {"kind": "commitment", "text": "Check the permit covers the new layout", "segment_ids": ["S3"], "quote": "Someone should check whether the permit covers the new layout", "speaker": "SPEAKER_01", "owner": "SPEAKER_01", "due": "Friday"}
+      ]
+    },
+    "owner_moved_to_other_speaker": {
+      "overview": "Delivery and permit follow-ups.",
+      "items": [
+        {"kind": "commitment", "text": "Check the permit", "segment_ids": ["S3"], "quote": "Someone should check whether the permit covers the new layout", "speaker": "SPEAKER_01", "owner": "SPEAKER_00", "due": "Not stated"}
+      ]
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "description": "A deadline stated as Monday and then corrected to Tuesday by the same speaker.",
+  "transcript": {
+    "text": "I'll send the inspection report to the owner on Monday. Monday works for me. Sorry, correction: I'll send it Tuesday, not Monday, because the lab results come back Monday afternoon.",
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 4.0, "text": "I'll send the inspection report to the owner on Monday.", "speaker": "SPEAKER_00"},
+      {"start": 4.3, "end": 6.1, "text": "Monday works for me.", "speaker": "SPEAKER_01"},
+      {"start": 6.5, "end": 11.2, "text": "Sorry, correction: I'll send it Tuesday, not Monday, because the lab results come back Monday afternoon.", "speaker": "SPEAKER_00"}
+    ]
+  },
+  "model_outputs": {
+    "superseded_deadline": {
+      "overview": "The inspection report delivery date was discussed.",
+      "items": [
+        {"kind": "commitment", "text": "Send the inspection report to the owner", "segment_ids": ["S1"], "quote": "I'll send the inspection report to the owner on Monday", "speaker": "SPEAKER_00", "owner": "SPEAKER_00", "due": "Monday"}
+      ]
+    },
+    "corrected_deadline": {
+      "overview": "The inspection report date moved to Tuesday.",
+      "items": [
+        {"kind": "commitment", "text": "Send the inspection report to the owner", "segment_ids": ["S1", "S3"], "quote": "I'll send it Tuesday, not Monday", "speaker": "SPEAKER_00", "owner": "SPEAKER_00", "due": "Tuesday"}
+      ]
+    },
+    "monday_despite_cited_correction": {
+      "overview": "The inspection report date was discussed.",
+      "items": [
+        {"kind": "commitment", "text": "Send the inspection report", "segment_ids": ["S3"], "quote": "I'll send it Tuesday, not Monday", "speaker": "SPEAKER_00", "owner": "SPEAKER_00", "due": "Monday"}
+      ]
+    }
+  }
+}

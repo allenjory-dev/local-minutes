@@ -1,0 +1,53 @@
+{
+  "description": "Wrong speaker attribution, wrong segment references, paraphrased and fabricated quotes.",
+  "transcript": {
+    "text": "The vent terminal has to be at least one metre from the window. I don't think that's right, I remember it being less. We can look it up later.",
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 5.0, "text": "The vent terminal has to be at least one metre from the window.", "speaker": "SPEAKER_00"},
+      {"start": 5.4, "end": 8.0, "text": "I don't think that's right, I remember it being less.", "speaker": "SPEAKER_01"},
+      {"start": 8.4, "end": 10.0, "text": "We can look it up later.", "speaker": "SPEAKER_00"}
+    ]
+  },
+  "model_outputs": {
+    "wrong_speaker": {
+      "overview": "A vent terminal clearance was discussed.",
+      "items": [
+        {"kind": "technical_claim", "text": "Vent terminal at least one metre from the window", "segment_ids": ["S1"], "quote": "The vent terminal has to be at least one metre from the window", "speaker": "SPEAKER_01", "owner": "Not stated", "due": "Not stated", "timestamp": "00:45:00", "start": 2700}
+      ]
+    },
+    "quote_cites_wrong_segment": {
+      "overview": "A vent terminal clearance was discussed.",
+      "items": [
+        {"kind": "technical_claim", "text": "Vent terminal clearance", "segment_ids": ["S2"], "quote": "The vent terminal has to be at least one metre from the window", "speaker": "SPEAKER_01", "owner": "Not stated", "due": "Not stated"}
+      ]
+    },
+    "paraphrased_quote": {
+      "overview": "A follow-up lookup was mentioned.",
+      "items": [
+        {"kind": "suggestion", "text": "Look up the requirement later", "segment_ids": ["S3"], "quote": "We should look it up later", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated"}
+      ]
+    },
+    "fabricated_reference": {
+      "overview": "A clearance decision.",
+      "items": [
+        {"kind": "decision", "text": "The clearance is acceptable", "segment_ids": ["S9"], "quote": "We agreed the clearance is fine", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated"}
+      ]
+    },
+    "fabricated_quote": {
+      "overview": "A clearance decision.",
+      "items": [
+        {"kind": "decision", "text": "The clearance is acceptable", "segment_ids": ["S1"], "quote": "We agreed the clearance is fine", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated"}
+      ]
+    },
+    "unusable_items": {
+      "overview": "Malformed items.",
+      "items": [
+        {"kind": "action_item", "text": "Look it up", "segment_ids": ["S3"], "quote": "We can look it up later", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated"},
+        {"kind": "suggestion", "text": "Look it up", "segment_ids": ["S3"], "quote": "", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated"},
+        {"kind": "suggestion", "text": "Look it up", "segment_ids": [], "quote": "We can look it up later", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated"},
+        {"kind": "question", "text": 42, "segment_ids": ["S2"], "quote": "I don't think that's right"}
+      ]
+    }
+  }
+}

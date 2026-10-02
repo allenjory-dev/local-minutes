@@ -336,3 +336,19 @@ func TestOpenAIHTTPErrorAndStreamingUnsupportedDetection(t *testing.T) {
 		t.Fatal("ordinary provider errors must not trigger the non-streaming fallback")
 	}
 }
+
+func TestUnreachableProviderIsReported(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close() // nothing is listening any more
+
+	for name, svc := range map[string]OutcomeStreamer{
+		"ollama": NewOllamaService(url),
+		"openai": NewOpenAIService("k", &url),
+	} {
+		_, out := collect(t, svc, GenerationOptions{})
+		if out.Completed || !errors.Is(out.Err, ErrProviderUnreachable) {
+			t.Fatalf("%s: expected ErrProviderUnreachable, got %+v", name, out)
+		}
+	}
+}

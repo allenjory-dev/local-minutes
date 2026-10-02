@@ -1,0 +1,306 @@
+package summary
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type fixture struct {
+	Description  string                     `json:"description"`
+	Transcript   json.RawMessage            `json:"transcript"`
+	ModelOutputs map[string]json.RawMessage `json:"model_outputs"`
+}
+
+func loadFixture(t *testing.T, name string) (fixture, *Transcript) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	require.NoError(t, err)
+	var f fixture
+	require.NoError(t, json.Unmarshal(b, &f))
+	tr, err := ParseStoredTranscript(string(f.Transcript))
+	require.NoError(t, err)
+	return f, tr
+}
+
+// draftFor runs the mocked model output for a scenario through parsing and
+// validation, exactly as the server does after a completed stream.
+func draftFor(t *testing.T, file, scenario string) (*StoredDraft, *Transcript) {
+	t.Helper()
+	f, tr := loadFixture(t, file)
+	out, ok := f.ModelOutputs[scenario]
+	require.True(t, ok, "scenario %s missing from %s", scenario, file)
+	d, err := BuildDraft(string(out), tr)
+	require.NoError(t, err)
+	return d, tr
+}
+
+func flagCodes(c Candidate) []string {
+	var codes []string
+	for _, f := range c.Flags {
+		codes = append(codes, f.Code)
+	}
+	return codes
+}
+
+func onlyCandidate(t *testing.T, d *StoredDraft) Candidate {
+	t.Helper()
+	require.Len(t, d.Candidates, 1)
+	return d.Candidates[0]
+}
+
+// Every candidate, whatever the scenario, must leave validation unaccepted.
+func assertNeverAccepted(t *testing.T, d *StoredDraft) {
+	t.Helper()
+	for _, c := range d.Candidates {
+		assert.Equal(t, ReviewNeedsReview, c.ReviewState, "candidate %s", c.ID)
+		if c.VerificationStatus != "" {
+			assert.Equal(t, VerificationUnverified, c.VerificationStatus, "candidate %s", c.ID)
+		}
+	}
+}
+
+func TestExplicitCommitmentVersusUnassignedSuggestion(t *testing.T) {
+	d, _ := draftFor(t, "supplier_commitment.json", "correct")
+	require.Len(t, d.Candidates, 2)
+	assertNeverAccepted(t, d)
+
+	commitment := d.Candidates[0]
+	assert.Equal(t, KindCommitment, commitment.Kind)
+	assert.True(t, commitment.QuoteMatched)
+	assert.Equal(t, "SPEAKER_00", commitment.Speaker)
+	assert.Equal(t, "SPEAKER_00", commitment.Owner)
+	assert.Equal(t, "Friday", commitment.Due)
+	assert.Empty(t, commitment.Flags, "an explicit 'I will ... by Friday' should not be flagged")
+	require.Len(t, commitment.Evidence, 1)
+	assert.Equal(t, "S2", commitment.Evidence[0].SegmentID)
+	assert.Equal(t, 4.2, commitment.Evidence[0].Start)
+	assert.Equal(t, 8.9, commitment.Evidence[0].End)
+
+	suggestion := d.Candidates[1]
+	assert.Equal(t, KindSuggestion, suggestion.Kind)
+	assert.Equal(t, NotStated, suggestion.Owner)
+	assert.Equal(t, NotStated, suggestion.Due)
+	assert.Equal(t, "SPEAKER_01", suggestion.Speaker)
+}
+
+// Regression: the qualified model promoted "someone should check" to an action item.
+func TestSuggestionPromotedToCommitmentIsFlagged(t *testing.T) {
+	d, _ := draftFor(t, "supplier_commitment.json", "suggestion_promoted_to_commitment")
+	c := onlyCandidate(t, d)
+	assertNeverAccepted(t, d)
+	assert.False(t, c.Rejected, "the item stays visible for review")
+	assert.Contains(t, flagCodes(c), FlagCommitmentNotExplicit)
+	assert.Contains(t, flagCodes(c), FlagDueNotInEvidence, "Friday belongs to a different segment")
+	for _, f := range c.Flags {
+		if f.Code == FlagCommitmentNotExplicit {
+			assert.Contains(t, f.Message, "suggestion")
+		}
+	}
+}
+
+func TestOwnerMovedToAnotherSpeakerIsFlagged(t *testing.T) {
+	d, _ := draftFor(t, "supplier_commitment.json", "owner_moved_to_other_speaker")
+	c := onlyCandidate(t, d)
+	assert.Contains(t, flagCodes(c), FlagOwnerNotSupported)
+	assert.Contains(t, flagCodes(c), FlagCommitmentNotExplicit)
+}
+
+func TestProposedPurchaseNotAgreedIsNotAcceptedAsDecision(t *testing.T) {
+	d, _ := draftFor(t, "purchase_not_agreed.json", "proposal_as_decision")
+	c := onlyCandidate(t, d)
+	assertNeverAccepted(t, d)
+	assert.Equal(t, KindDecision, c.Kind)
+	assert.Contains(t, flagCodes(c), FlagDecisionNotExplicit)
+
+	d, _ = draftFor(t, "purchase_not_agreed.json", "refusal_as_commitment")
+	c = onlyCandidate(t, d)
+	assert.Contains(t, flagCodes(c), FlagCommitmentNotExplicit, "a refusal is not a commitment")
+
+	d, _ = draftFor(t, "purchase_not_agreed.json", "correct")
+	require.Len(t, d.Candidates, 2)
+	assert.Equal(t, KindSuggestion, d.Candidates[0].Kind)
+	assert.True(t, d.Candidates[0].QuoteMatched)
+	assert.True(t, d.Candidates[0].Evidence[0].ContainsQuote)
+	assert.False(t, d.Candidates[0].Evidence[1].ContainsQuote, "S2 is cited context, not the quote source")
+	assert.NotContains(t, flagCodes(d.Candidates[1]), FlagDecisionNotExplicit)
+}
+
+func TestMondayCorrectedToTuesday(t *testing.T) {
+	d, _ := draftFor(t, "deadline_correction.json", "superseded_deadline")
+	c := onlyCandidate(t, d)
+	assert.Equal(t, "Monday", c.Due)
+	require.Contains(t, flagCodes(c), FlagPossibleLaterCorrection)
+	for _, f := range c.Flags {
+		if f.Code == FlagPossibleLaterCorrection {
+			assert.Equal(t, "S3", f.SegmentID)
+		}
+	}
+
+	d, _ = draftFor(t, "deadline_correction.json", "corrected_deadline")
+	c = onlyCandidate(t, d)
+	assert.Equal(t, "Tuesday", c.Due)
+	assert.True(t, c.QuoteMatched)
+	assert.Empty(t, c.Flags, "the corrected deadline cites the correcting segment")
+
+	d, _ = draftFor(t, "deadline_correction.json", "monday_despite_cited_correction")
+	c = onlyCandidate(t, d)
+	assert.Contains(t, flagCodes(c), FlagDueContradicted)
+}
+
+func TestMissingOwnerAndDeadlineStayNotStated(t *testing.T) {
+	d, _ := draftFor(t, "missing_owner_deadline.json", "blank_fields")
+	c := onlyCandidate(t, d)
+	assert.Equal(t, NotStated, c.Owner)
+	assert.Equal(t, NotStated, c.Due)
+	assert.NotContains(t, flagCodes(c), FlagOwnerNotInEvidence)
+
+	d, _ = draftFor(t, "missing_owner_deadline.json", "invented_owner_and_date")
+	c = onlyCandidate(t, d)
+	assert.Equal(t, "Dave", c.Owner, "model values are shown as written, with flags")
+	assert.Contains(t, flagCodes(c), FlagOwnerNotInEvidence)
+	assert.Contains(t, flagCodes(c), FlagDueNotInEvidence)
+}
+
+func TestQuoteAttributedToWrongSpeaker(t *testing.T) {
+	d, _ := draftFor(t, "wrong_speaker_and_fabrication.json", "wrong_speaker")
+	c := onlyCandidate(t, d)
+	assert.True(t, c.QuoteMatched)
+	assert.Equal(t, "SPEAKER_00", c.Speaker, "speaker comes from the transcript")
+	assert.Equal(t, "SPEAKER_01", c.ModelSpeaker)
+	assert.Contains(t, flagCodes(c), FlagSpeakerMismatch)
+	// The model's invented timestamp (00:45:00) is ignored; times come from S1.
+	assert.Equal(t, 0.0, c.Evidence[0].Start)
+	assert.Equal(t, 5.0, c.Evidence[0].End)
+	assert.Equal(t, VerificationUnverified, c.VerificationStatus)
+
+	d, _ = draftFor(t, "wrong_speaker_and_fabrication.json", "quote_cites_wrong_segment")
+	c = onlyCandidate(t, d)
+	assert.False(t, c.QuoteMatched)
+	require.Contains(t, flagCodes(c), FlagQuoteNotInCitedSegments)
+	for _, f := range c.Flags {
+		if f.Code == FlagQuoteNotInCitedSegments {
+			assert.Equal(t, "S1", f.SegmentID)
+			assert.Contains(t, f.Message, "SPEAKER_00")
+		}
+	}
+}
+
+func TestParaphraseAndFabricatedQuotesAreFlagged(t *testing.T) {
+	d, _ := draftFor(t, "wrong_speaker_and_fabrication.json", "paraphrased_quote")
+	c := onlyCandidate(t, d)
+	assert.False(t, c.QuoteMatched, "'should' is not what was said ('can')")
+	assert.Contains(t, flagCodes(c), FlagQuoteNotInCitedSegments)
+
+	d, _ = draftFor(t, "wrong_speaker_and_fabrication.json", "fabricated_quote")
+	c = onlyCandidate(t, d)
+	assert.False(t, c.QuoteMatched)
+	assert.Contains(t, flagCodes(c), FlagQuoteNotInCitedSegments)
+}
+
+func TestFabricatedSegmentReferenceIsRejected(t *testing.T) {
+	d, _ := draftFor(t, "wrong_speaker_and_fabrication.json", "fabricated_reference")
+	c := onlyCandidate(t, d)
+	assert.True(t, c.Rejected)
+	assert.Contains(t, flagCodes(c), FlagSegmentNotFound)
+	assert.Empty(t, c.Evidence)
+	assert.Equal(t, 1, d.Report.Rejected)
+	assert.Equal(t, 0, d.Report.Usable)
+}
+
+func TestUnusableItemsAreRejectedNotDropped(t *testing.T) {
+	d, _ := draftFor(t, "wrong_speaker_and_fabrication.json", "unusable_items")
+	require.Len(t, d.Candidates, 4)
+	for _, c := range d.Candidates {
+		assert.True(t, c.Rejected, "candidate %s", c.ID)
+	}
+	assert.Contains(t, flagCodes(d.Candidates[0]), FlagUnknownKind)
+	assert.Contains(t, flagCodes(d.Candidates[1]), FlagMissingQuote)
+	assert.Contains(t, flagCodes(d.Candidates[2]), FlagNoSegmentReference)
+	assert.Contains(t, flagCodes(d.Candidates[3]), FlagMalformedItem)
+}
+
+func TestConflictingTechnicalClaimsStayUnverified(t *testing.T) {
+	d, _ := draftFor(t, "conflicting_technical_claims.json", "model_claims_verified")
+	require.Len(t, d.Candidates, 4)
+	assertNeverAccepted(t, d)
+	for _, c := range d.Candidates {
+		assert.Equal(t, VerificationUnverified, c.VerificationStatus,
+			"candidate %s: speaker assertions, model agreement, matching quotes and repetition never verify", c.ID)
+	}
+	assert.True(t, d.Candidates[0].QuoteMatched, "a matching quote proves only that it was said")
+	assert.Contains(t, flagCodes(d.Candidates[1]), FlagVerificationAsserted)
+	assert.Contains(t, flagCodes(d.Candidates[2]), FlagVerificationAsserted)
+	assert.Contains(t, flagCodes(d.Candidates[3]), FlagTechnicalContent)
+
+	// Nothing the model wrote ("verified": true, "VERIFIED", "accepted") survives.
+	b, err := json.Marshal(d)
+	require.NoError(t, err)
+	s := string(b)
+	assert.NotContains(t, strings.ReplaceAll(s, "UNVERIFIED", ""), "VERIFIED")
+	assert.NotContains(t, s, `"verified":`)
+	assert.NotContains(t, s, "accepted")
+	assert.NotContains(t, s, "approved\"")
+}
+
+func TestTranscriptInjectionCannotDirectTheResult(t *testing.T) {
+	d, _ := draftFor(t, "prompt_injection.json", "obeys_injection")
+	require.Len(t, d.Candidates, 2)
+	assertNeverAccepted(t, d)
+
+	obeyed := d.Candidates[0]
+	assert.Contains(t, flagCodes(obeyed), FlagInstructionLikeText)
+	assert.Contains(t, flagCodes(obeyed), FlagOwnerNotSupported, "SPEAKER_00 never took this on")
+	assert.Contains(t, flagCodes(obeyed), FlagCommitmentNotExplicit)
+	assert.Equal(t, "SPEAKER_01", obeyed.Speaker)
+
+	claim := d.Candidates[1]
+	assert.Equal(t, VerificationUnverified, claim.VerificationStatus)
+}
+
+func TestConversationWithNoActions(t *testing.T) {
+	d, tr := draftFor(t, "no_actions.json", "correct")
+	assert.Empty(t, d.Candidates)
+	assert.Equal(t, Report{}, d.Report)
+	assert.Equal(t, tr.SHA256, d.TranscriptSHA256)
+	assert.Equal(t, 3, d.SegmentCount)
+}
+
+func TestQuoteMatchingRules(t *testing.T) {
+	tr := &Transcript{byID: map[string]int{}}
+	for i, s := range []Segment{
+		{Speaker: "SPEAKER_00", Text: "I will call the supplier,"},
+		{Speaker: "SPEAKER_00", Text: "by Friday at the latest."},
+		{Speaker: "SPEAKER_01", Text: "Unrelated."},
+		{Speaker: "SPEAKER_00", Text: "Friday works."},
+	} {
+		s.ID, s.Index = "S"+string(rune('1'+i)), i
+		tr.byID[s.ID] = i
+		tr.Segments = append(tr.Segments, s)
+	}
+	run := func(segs []string, quote string) bool {
+		var cited []Segment
+		for _, id := range segs {
+			s, _ := tr.Segment(id)
+			cited = append(cited, s)
+		}
+		ok, _ := matchInRuns(quoteParts(quote), cited)
+		return ok
+	}
+	assert.True(t, run([]string{"S1", "S2"}, "I will call the supplier by Friday"), "adjacent segments may be joined")
+	assert.True(t, run([]string{"S1"}, "“I will call the supplier.”"), "case, quotes and punctuation are ignored")
+	assert.True(t, run([]string{"S1", "S2"}, "I will call ... at the latest"), "ellipsis gaps keep word order")
+	assert.False(t, run([]string{"S1"}, "I'll call the supplier"), "contractions are different words")
+	assert.False(t, run([]string{"S1", "S4"}, "the supplier Friday works"), "non-adjacent segments are never joined")
+	assert.False(t, run([]string{"S2"}, "at the latest ... by Friday"), "ellipsis parts must stay in order")
+
+	assert.Equal(t, []string{"S3", "S12", "S7"}, canonicalSegmentIDs([]string{"s03", "[S12]", "7", "S3"}))
+	assert.Equal(t, normLabel("SPEAKER_00"), normLabel("Speaker 0"))
+	assert.NotEqual(t, normLabel("SPEAKER_00"), normLabel("SPEAKER_01"))
+	assert.Equal(t, []string{"300", "mm", "clearance"}, words("300mm clearance"))
+}

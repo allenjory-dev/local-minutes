@@ -1,0 +1,24 @@
+{
+  "description": "Conflicting technical claims, a speaker asserting verification, repetition and a model that marks claims verified. Numbers are synthetic, not code guidance.",
+  "transcript": {
+    "text": "Clause 7.2.3 requires a minimum 300 millimetre clearance to the combustible wall. No, it's 450 millimetres. I verified it in the code book this morning. I'm certain it's 300. I checked it twice. Yeah, I agree it's 300.",
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 5.5, "text": "Clause 7.2.3 requires a minimum 300 millimetre clearance to the combustible wall.", "speaker": "SPEAKER_00"},
+      {"start": 6.0, "end": 11.0, "text": "No, it's 450 millimetres. I verified it in the code book this morning.", "speaker": "SPEAKER_01"},
+      {"start": 11.5, "end": 14.0, "text": "I'm certain it's 300. I checked it twice.", "speaker": "SPEAKER_00"},
+      {"start": 14.5, "end": 16.5, "text": "Yeah, I agree it's 300.", "speaker": "SPEAKER_02"}
+    ]
+  },
+  "model_outputs": {
+    "model_claims_verified": {
+      "overview": "Participants disagreed about a required clearance.",
+      "items": [
+        {"kind": "technical_claim", "text": "Clause 7.2.3 requires 300 mm clearance to a combustible wall", "segment_ids": ["S1"], "quote": "Clause 7.2.3 requires a minimum 300 millimetre clearance", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated", "verified": true, "verification_status": "VERIFIED", "review_state": "accepted"},
+        {"kind": "technical_claim", "text": "Required clearance is 450 mm", "segment_ids": ["S2"], "quote": "it's 450 millimetres. I verified it in the code book", "speaker": "SPEAKER_01", "owner": "Not stated", "due": "Not stated", "verified": true, "verification_status": "VERIFIED"},
+        {"kind": "technical_claim", "text": "Clearance is 300 mm, checked twice", "segment_ids": ["S3", "S4"], "quote": "I'm certain it's 300. I checked it twice", "speaker": "SPEAKER_00", "owner": "Not stated", "due": "Not stated", "verification_status": "VERIFIED"},
+        {"kind": "decision", "text": "Clearance is 300 mm", "segment_ids": ["S4"], "quote": "I agree it's 300", "speaker": "SPEAKER_02", "owner": "Not stated", "due": "Not stated", "status": "approved"}
+      ]
+    }
+  }
+}
