@@ -276,13 +276,14 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}
+	originalPath := filePath
 
 	// Check if file is .webm and convert to MP3
 	// WebM files from browser MediaRecorder often lack proper duration metadata,
 	// causing playback issues. Converting to MP3 ensures proper metadata.
 	if strings.ToLower(filepath.Ext(filePath)) == ".webm" {
 		// Generate MP3 path
-		mp3Path := strings.TrimSuffix(filePath, filepath.Ext(filePath)) + ".mp3"
+		mp3Path := strings.TrimSuffix(filePath, filepath.Ext(filePath)) + ".playback.mp3"
 
 		// Convert using FFmpeg with high quality settings and audio normalization
 		// -i: input file
@@ -290,28 +291,28 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 		// -af loudnorm: normalize audio levels (prevents muffled/quiet recordings)
 		// -acodec libmp3lame: MP3 encoder
 		// -b:a 320k: high quality constant bitrate (better than VBR for recordings)
-		cmd := exec.Command("ffmpeg", "-i", filePath, "-vn", "-af", "loudnorm", "-acodec", "libmp3lame", "-b:a", "320k", mp3Path)
+		cmd := exec.CommandContext(c.Request.Context(), "ffmpeg", "-nostdin", "-n", "-i", originalPath, "-vn", "-af", "loudnorm", "-acodec", "libmp3lame", "-b:a", "320k", mp3Path)
 		if err := cmd.Run(); err != nil {
-			_ = h.fileService.RemoveFile(filePath)
+			// Retain the source for recovery; only a partial derivative may be removed.
+			_ = h.fileService.RemoveFile(mp3Path)
+			logger.Warn("WebM conversion failed; original upload retained", "original_path", originalPath)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to convert WebM audio to MP3"})
 			return
 		}
-
-		// Delete original .webm file
-		_ = h.fileService.RemoveFile(filePath)
 
 		// Update filePath to point to the MP3
 		filePath = mp3Path
 	}
 
 	// Create job record
-	jobID := filepath.Base(filePath)
-	jobID = jobID[:len(jobID)-len(filepath.Ext(jobID))] // Extract ID from filename
+	jobID := filepath.Base(originalPath)
+	jobID = strings.TrimSuffix(jobID, filepath.Ext(jobID)) // Keep the upload's stable ID.
 
 	job := models.TranscriptionJob{
-		ID:        jobID,
-		AudioPath: filePath,
-		Status:    models.StatusUploaded,
+		ID:                jobID,
+		AudioPath:         filePath,
+		OriginalAudioPath: originalPath,
+		Status:            models.StatusUploaded,
 	}
 
 	if title := c.PostForm(paramTitle); title != "" {
@@ -320,7 +321,10 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 
 	// Save to database using Repository
 	if err := h.jobRepo.Create(c.Request.Context(), &job); err != nil {
-		_ = h.fileService.RemoveFile(filePath) // Clean up file
+		if filePath != originalPath {
+			_ = h.fileService.RemoveFile(filePath)
+		}
+		logger.Warn("Job creation failed; original upload retained", "original_path", originalPath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
 		return
 	}
