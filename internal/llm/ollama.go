@@ -305,7 +305,7 @@ func (s *OllamaService) StreamWithOutcome(ctx context.Context, model string, mes
 		}
 		if chunk.Message.Content != "" {
 			if err := onDelta(chunk.Message.Content); err != nil {
-				out.Err = fmt.Errorf("%w: %v", ErrDeltaRejected, err)
+				out.Err = fmt.Errorf("%w: %w", ErrDeltaRejected, err)
 				return out
 			}
 		}

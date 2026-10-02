@@ -323,6 +323,9 @@ type SummaryRepository interface {
 	SaveAttempt(ctx context.Context, attempt *models.SummaryAttempt) error
 	GetAttempt(ctx context.Context, id string) (*models.SummaryAttempt, error)
 	GetLatestAttempt(ctx context.Context, transcriptionID string) (*models.SummaryAttempt, error)
+	// FinishRunningAttempt ends an attempt only if it is still "running"; it
+	// reports false (and changes nothing) when the attempt already finished.
+	FinishRunningAttempt(ctx context.Context, id, status, reason, detail string, finishedAt time.Time) (bool, error)
 	// SaveCompletedSummary stores a completed summary, links and saves its
 	// attempt and refreshes the job's cached summary in one transaction.
 	SaveCompletedSummary(ctx context.Context, summary *models.Summary, attempt *models.SummaryAttempt) error
@@ -396,6 +399,13 @@ func (r *summaryRepository) GetLatestAttempt(ctx context.Context, transcriptionI
 		return nil, err
 	}
 	return &attempt, nil
+}
+
+func (r *summaryRepository) FinishRunningAttempt(ctx context.Context, id, status, reason, detail string, finishedAt time.Time) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&models.SummaryAttempt{}).
+		Where("id = ? AND status = ?", id, "running").
+		Updates(map[string]interface{}{"status": status, "reason": reason, "detail": detail, "finished_at": finishedAt})
+	return res.RowsAffected == 1, res.Error
 }
 
 func (r *summaryRepository) SaveCompletedSummary(ctx context.Context, summary *models.Summary, attempt *models.SummaryAttempt) error {

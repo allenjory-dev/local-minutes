@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +18,19 @@ import (
 
 // DB is the global database instance
 var DB *gorm.DB
+
+// NewSQLLogger matches GORM's default logger (warnings, errors and queries
+// slower than 200 ms) but never prints bound values. With values, a slow or
+// failed write would copy transcript text, summaries, provider messages or
+// credentials into the runtime logs.
+func NewSQLLogger(w io.Writer) logger.Interface {
+	return logger.New(log.New(w, "\r\n", log.LstdFlags), logger.Config{
+		SlowThreshold:        200 * time.Millisecond,
+		LogLevel:             logger.Warn,
+		Colorful:             true,
+		ParameterizedQueries: true,
+	})
+}
 
 // Initialize initializes the database connection with optimized settings
 func Initialize(dbPath string) error {
@@ -40,8 +55,8 @@ func Initialize(dbPath string) error {
 
 	// Open database connection with optimized config
 	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger:          logger.Default.LogMode(logger.Warn), // Reduce logging overhead
-		CreateBatchSize: 100,                                 // Optimize batch inserts
+		Logger:          NewSQLLogger(os.Stdout), // Warnings and errors, without bound values
+		CreateBatchSize: 100,                     // Optimize batch inserts
 	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %v", err)

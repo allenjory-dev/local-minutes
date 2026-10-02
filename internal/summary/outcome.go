@@ -29,6 +29,7 @@ const (
 	ReasonProviderUnreachable = "provider_unreachable"
 	ReasonStreamReadError     = "stream_read_error"
 	ReasonStreamEnded         = "stream_ended_without_completion"
+	ReasonUnreadableStream    = "stream_lines_unreadable"
 	ReasonOutputLimit         = "output_limit_reached"
 	ReasonUnexpectedFinish    = "unexpected_finish_reason"
 	ReasonContextExceeded     = "context_limit_exceeded"
@@ -83,7 +84,18 @@ func ClassifyOutcome(out llm.StreamOutcome, output string, limits Limits) Classi
 	if !out.Completed {
 		return Classification{StatusIncomplete, ReasonStreamEnded, "The provider stream ended without a completion signal; the output may be cut off."}
 	}
-	switch strings.ToLower(out.FinishReason) {
+	if out.SkippedLines > 0 {
+		// A line that could not be read may have carried output, so the text
+		// may have a gap even though the provider said it finished.
+		return Classification{StatusIncomplete, ReasonUnreadableStream,
+			fmt.Sprintf("%d line(s) of the provider stream could not be read; part of the output may be missing.", out.SkippedLines)}
+	}
+	reason := strings.ToLower(out.FinishReason)
+	if reason == "" && limits.MaxOutputTokens > 0 && out.OutputTokens >= limits.MaxOutputTokens {
+		// Some providers omit the finish reason; a full output budget means truncation.
+		reason = "length"
+	}
+	switch reason {
 	case "", "stop", "end_turn", "eos":
 	case "length", "max_tokens":
 		return Classification{StatusIncomplete, ReasonOutputLimit,

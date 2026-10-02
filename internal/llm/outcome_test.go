@@ -157,11 +157,12 @@ func TestOllamaStreamStopsWhenConsumerRejectsDelta(t *testing.T) {
 	))
 	defer srv.Close()
 
+	clientGone := errors.New("client went away")
 	out := NewOllamaService(srv.URL).StreamWithOutcome(context.Background(), "m", nil, GenerationOptions{}, func(string) error {
-		return errors.New("client went away")
+		return clientGone
 	})
-	if out.Completed || !errors.Is(out.Err, ErrDeltaRejected) {
-		t.Fatalf("expected ErrDeltaRejected, got %+v", out)
+	if out.Completed || !errors.Is(out.Err, ErrDeltaRejected) || !errors.Is(out.Err, clientGone) {
+		t.Fatalf("expected ErrDeltaRejected wrapping the callback error, got %+v", out)
 	}
 }
 

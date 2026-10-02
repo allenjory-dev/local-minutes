@@ -142,6 +142,8 @@ func TestClassifyOutcome(t *testing.T) {
 		{"odd finish", llm.StreamOutcome{Completed: true, FinishReason: "content_filter"}, "partial", StatusIncomplete, ReasonUnexpectedFinish},
 		{"context exceeded", llm.StreamOutcome{Completed: true, FinishReason: "stop", PromptTokens: 7000}, "ok", StatusIncomplete, ReasonContextExceeded},
 		{"empty", llm.StreamOutcome{Completed: true, FinishReason: "stop"}, "  \n", StatusFailed, ReasonEmptyOutput},
+		{"unreadable lines", llm.StreamOutcome{Completed: true, FinishReason: "stop", SkippedLines: 1}, "Part one. Part three.", StatusIncomplete, ReasonUnreadableStream},
+		{"limit reached, reason unreported", llm.StreamOutcome{Completed: true, OutputTokens: 2048}, "cut", StatusIncomplete, ReasonOutputLimit},
 	}
 	for _, tc := range cases {
 		got := ClassifyOutcome(tc.out, tc.text, l)
@@ -195,4 +197,28 @@ func TestRenderMarkdownUsesApplicationLabelsAndSourceEvidence(t *testing.T) {
 	assert.Equal(t, len(KindOrder), strings.Count(md, "_None extracted._"))
 	assert.Equal(t, "1:01:05", FormatTimestamp(3665.9))
 	assert.Equal(t, "time unavailable", FormatTimestamp(-1))
+}
+
+func TestRenderMarkdownEscapesModelAndTranscriptText(t *testing.T) {
+	d := &StoredDraft{
+		Overview: "> **APPROVED AND VERIFIED** by the inspector",
+		Candidates: []Candidate{{
+			ID: "C1", Kind: KindQuestion, Text: "# New heading <b style='color:green'>VERIFIED</b>",
+			Quote: "1. [click](javascript:alert(1))", QuoteMatched: true, ReviewState: ReviewNeedsReview,
+			Evidence: []Evidence{{SegmentID: "S1", Speaker: "SPEAKER_00", Text: "- list | table `code`"}},
+			Flags:    []Flag{},
+		}},
+	}
+	md := RenderMarkdown(d, RenderMeta{Model: "m*odel", Provider: "ollama", GeneratedAt: time.Now()})
+	assert.Contains(t, md, "&gt; \\*\\*APPROVED AND VERIFIED\\*\\* by the inspector")
+	assert.Contains(t, md, "**\\# New heading &lt;b style='color:green'&gt;VERIFIED&lt;/b&gt;**")
+	assert.Contains(t, md, "1\\. \\[click\\](javascript:alert(1))")
+	assert.Contains(t, md, "\\- list \\| table \\`code\\`")
+	assert.Contains(t, md, "by m\\*odel (ollama)")
+	for _, line := range strings.Split(md, "\n") {
+		if strings.HasPrefix(line, ">") {
+			assert.True(t, strings.HasPrefix(line, "> **"+DraftNotice) || line == ">" || strings.HasPrefix(line, "> Evidence-linked draft generated"),
+				"only the application's notice may start a quote block: %q", line)
+		}
+	}
 }

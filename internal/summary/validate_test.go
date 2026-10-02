@@ -304,3 +304,47 @@ func TestQuoteMatchingRules(t *testing.T) {
 	assert.NotEqual(t, normLabel("SPEAKER_00"), normLabel("SPEAKER_01"))
 	assert.Equal(t, []string{"300", "mm", "clearance"}, words("300mm clearance"))
 }
+
+// Cases found by independent review: quotes that hide a refusal or question,
+// verbatim deadlines and owners borrowed from a neighbouring cited segment.
+func TestReviewFoundEvasions(t *testing.T) {
+	raw := `{"segments":[
+		{"start":0,"end":3,"text":"I will not approve the budget.","speaker":"SPEAKER_00"},
+		{"start":3,"end":7,"text":"We agreed we will not go ahead with the purchase.","speaker":"SPEAKER_01"},
+		{"start":7,"end":9,"text":"Is the budget approved?","speaker":"SPEAKER_00"},
+		{"start":9,"end":10,"text":"No idea.","speaker":"SPEAKER_01"},
+		{"start":10,"end":12,"text":"Budget approved for the fittings then.","speaker":"SPEAKER_00"},
+		{"start":12,"end":15,"text":"I'll send the drawings by Monday.","speaker":"SPEAKER_01"},
+		{"start":15,"end":16,"text":"Hmm, okay.","speaker":"SPEAKER_00"},
+		{"start":16,"end":19,"text":"Actually not Monday then, Tuesday.","speaker":"SPEAKER_01"}]}`
+	tr, err := ParseStoredTranscript(raw)
+	require.NoError(t, err)
+	item := func(kind string, ids []string, quote, owner, due string) RawItem {
+		return RawItem{Kind: kind, Text: "x", SegmentIDs: ids, Quote: quote, Owner: owner, Due: due}
+	}
+	cands, _ := Validate(&RawDraft{Items: []RawItem{
+		item(KindCommitment, []string{"S1"}, "I will ... approve the budget", "SPEAKER_00", "Not stated"),
+		item(KindDecision, []string{"S2"}, "We agreed ... go ahead with the purchase", "Not stated", "Not stated"),
+		item(KindDecision, []string{"S3", "S4", "S5"}, "the budget approved ... budget approved for the fittings", "Not stated", "Not stated"),
+		item(KindCommitment, []string{"S6"}, "I'll send the drawings by Monday", "SPEAKER_01", "by Monday"),
+		item(KindCommitment, []string{"S6", "S7"}, "I'll send the drawings", "SPEAKER_00", "Not stated"),
+	}}, tr)
+	require.Len(t, cands, 5)
+
+	assert.True(t, cands[0].QuoteMatched)
+	assert.Contains(t, flagCodes(cands[0]), FlagQuoteHasGap)
+	assert.Contains(t, flagCodes(cands[0]), FlagCommitmentNotExplicit, "the skipped 'not' is in the segment")
+
+	assert.Contains(t, flagCodes(cands[1]), FlagQuoteHasGap)
+	assert.Contains(t, flagCodes(cands[1]), FlagDecisionNotExplicit)
+
+	assert.Contains(t, flagCodes(cands[2]), FlagQuoteHasGap)
+	assert.Contains(t, flagCodes(cands[2]), FlagDecisionNotExplicit, "the stitched span contains a question")
+
+	assert.Contains(t, flagCodes(cands[3]), FlagPossibleLaterCorrection, "'by Monday' is corrected by 'not Monday'")
+	assert.NotContains(t, flagCodes(cands[3]), FlagDueNotInEvidence)
+
+	assert.Contains(t, flagCodes(cands[4]), FlagOwnerNotSupported, "SPEAKER_00 only said 'Hmm, okay.'")
+	assert.Equal(t, []string{"monday"}, coreDueWords("no later than Monday"))
+	assert.Equal(t, []string{"next", "quarter"}, coreDueWords("next quarter"))
+}

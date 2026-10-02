@@ -593,6 +593,78 @@ func (s *SummaryReliabilityTestSuite) TestFreeformStreamSavesOnlyConfirmedComple
 	assert.Equal(t, int64(1), s.countSummaries(job.ID))
 }
 
+func (s *SummaryReliabilityTestSuite) TestOversizedOutputAndUnreadableLinesAreNotSaved() {
+	t := s.T()
+	transcriptJSON, good := loadSummaryFixture(t, "supplier_commitment.json", "correct")
+	job := s.createJob(transcriptJSON)
+
+	// A provider that never stops: generation is stopped at the safety limit
+	// and reported as incomplete, not as a user cancellation.
+	s.ollama.set(func(w http.ResponseWriter, r *http.Request) {
+		filler := ndjsonChunk(strings.Repeat("x", 64<<10))
+		var lines []string
+		for i := 0; i < 20; i++ {
+			lines = append(lines, filler)
+		}
+		writeLines(w, append(lines, doneStop))
+	})
+	code, resp := s.generate(job.ID)
+	assert.Equal(t, http.StatusBadGateway, code)
+	assert.Equal(t, summary.StatusIncomplete, resp.Attempt.Status)
+	assert.Equal(t, summary.ReasonOutputTooLarge, resp.Attempt.Reason)
+
+	// One unreadable line between valid chunks: the provider said "done", but
+	// part of the output may be missing, so nothing is saved.
+	s.ollama.set(func(w http.ResponseWriter, r *http.Request) {
+		writeLines(w, []string{ndjsonChunk(good[:30]), `{"message":{"content":"lost`, ndjsonChunk(good[30:]), doneStop})
+	})
+	code, resp = s.generate(job.ID)
+	assert.Equal(t, http.StatusBadGateway, code)
+	assert.Equal(t, summary.ReasonUnreadableStream, resp.Attempt.Reason)
+	assert.Contains(t, resp.Attempt.Detail, "1 line(s)")
+	assert.Equal(t, int64(0), s.countSummaries(job.ID))
+
+	// Free-form: when the provider fails before any text is streamed, the
+	// client receives a real error status and the attempt, not an empty 200.
+	s.ollama.set(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":"model not loaded"}`)
+	})
+	w := s.do(context.Background(), http.MethodPost, "/api/v1/summarize/",
+		map[string]any{"model": "m", "content": "Transcript:\nhello", "transcription_id": job.ID})
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
+	var body struct {
+		Attempt models.SummaryAttempt `json:"attempt"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+	assert.Equal(t, summary.StatusFailed, body.Attempt.Status)
+	assert.Equal(t, w.Header().Get("X-Summary-Attempt-Id"), body.Attempt.ID)
+}
+
+func (s *SummaryReliabilityTestSuite) TestStaleCheckNeverOverwritesAFinishedAttempt() {
+	t := s.T()
+	repo := repository.NewSummaryRepository(s.helper.DB)
+	transcriptJSON, _ := loadSummaryFixture(t, "no_actions.json", "")
+	job := s.createJob(transcriptJSON)
+	finished := &models.SummaryAttempt{TranscriptionID: job.ID, Mode: summary.ModeGrounded, Status: summary.StatusCompleted, StartedAt: time.Now()}
+	require.NoError(t, repo.CreateAttempt(context.Background(), finished))
+
+	// A reader that saw the row while it was still running must not clobber it.
+	updated, err := repo.FinishRunningAttempt(context.Background(), finished.ID, summary.StatusIncomplete, summary.ReasonInterrupted, "x", time.Now())
+	require.NoError(t, err)
+	assert.False(t, updated)
+	stored, err := repo.GetAttempt(context.Background(), finished.ID)
+	require.NoError(t, err)
+	assert.Equal(t, summary.StatusCompleted, stored.Status)
+
+	running := &models.SummaryAttempt{TranscriptionID: job.ID, Mode: summary.ModeGrounded, Status: summary.StatusRunning, StartedAt: time.Now()}
+	require.NoError(t, repo.CreateAttempt(context.Background(), running))
+	updated, err = repo.FinishRunningAttempt(context.Background(), running.ID, summary.StatusIncomplete, summary.ReasonInterrupted, "x", time.Now())
+	require.NoError(t, err)
+	assert.True(t, updated)
+}
+
 func (s *SummaryReliabilityTestSuite) TestSummaryLogsContainNoTranscriptOrModelText() {
 	t := s.T()
 	transcriptJSON, output := loadSummaryFixture(t, "supplier_commitment.json", "correct")

@@ -378,7 +378,7 @@ func (s *OpenAIService) StreamWithOutcome(ctx context.Context, model string, mes
 		choice := chunk.Choices[0]
 		if choice.Delta.Content != "" {
 			if err := onDelta(choice.Delta.Content); err != nil {
-				out.Err = fmt.Errorf("%w: %v", ErrDeltaRejected, err)
+				out.Err = fmt.Errorf("%w: %w", ErrDeltaRejected, err)
 				return out
 			}
 		}

@@ -25,8 +25,9 @@ export function GroundedDraftView({ draft, speakerNames }: GroundedDraftViewProp
             </section>
 
             <p className="text-xs text-[var(--text-tertiary)]">
-                {r.items} candidates: {r.usable} with transcript evidence, {r.flagged} flagged for review, {r.rejected} rejected by validation.
-                Every item needs human review; none is an accepted decision or task.
+                {r.items} candidates: {r.usable} cite existing transcript segments ({r.quotes_matched} with the quote found in a cited segment),
+                {" "}{r.flagged} flagged for review, {r.rejected} rejected by validation. Every item needs human review; none is an accepted
+                decision or task.
             </p>
 
             {usable.length === 0 && (

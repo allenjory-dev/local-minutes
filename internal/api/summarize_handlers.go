@@ -127,6 +127,13 @@ func (h *Handler) Summarize(c *gin.Context) {
 	if !cls.Completed() {
 		h.finishAttempt(attempt, cls)
 		logAttemptEnd(attempt)
+		if !c.Writer.Written() {
+			// Nothing was streamed yet, so a real error status can still be sent.
+			for _, k := range []string{"Content-Type", "Transfer-Encoding", "Cache-Control", "Connection", "X-Accel-Buffering"} {
+				c.Writer.Header().Del(k)
+			}
+			c.JSON(cls.HTTPStatus(), gin.H{"error": attempt.Detail, "attempt": attempt})
+		}
 		return
 	}
 

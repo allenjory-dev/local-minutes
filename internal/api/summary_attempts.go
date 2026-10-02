@@ -146,16 +146,31 @@ func recordOutcomeMetrics(a *models.SummaryAttempt, out llm.StreamOutcome, outpu
 }
 
 // reconcileStaleAttempt reports a "running" attempt that this process is not
-// running as interrupted, and records that.
+// running as interrupted, and records that. The update only applies while the
+// stored row is still "running", so an attempt that finished between the read
+// and this check keeps its real outcome.
 func (h *Handler) reconcileStaleAttempt(a *models.SummaryAttempt) *models.SummaryAttempt {
 	if a.Status != summary.StatusRunning || activeSummaryAttempts.has(a.ID) {
 		return a
 	}
-	h.finishAttempt(a, summary.Classification{
+	cls := summary.Classification{
 		Status: summary.StatusIncomplete,
 		Reason: summary.ReasonInterrupted,
 		Detail: "The server stopped before this attempt finished. Nothing from it was saved.",
-	})
+	}
+	now := time.Now()
+	updated, err := h.summaryRepo.FinishRunningAttempt(context.Background(), a.ID, cls.Status, cls.Reason, cls.Detail, now)
+	if err != nil {
+		log.Printf("[summary] failed to mark attempt=%s interrupted: %v", a.ID, err)
+		return a
+	}
+	if !updated {
+		if fresh, err := h.summaryRepo.GetAttempt(context.Background(), a.ID); err == nil {
+			return fresh
+		}
+		return a
+	}
+	a.Status, a.Reason, a.Detail, a.FinishedAt = cls.Status, cls.Reason, cls.Detail, &now
 	return a
 }
 

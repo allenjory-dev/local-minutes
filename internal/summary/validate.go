@@ -107,7 +107,10 @@ func validateItem(id string, item RawItem, t *Transcript) Candidate {
 	matched, covered := matchInRuns(parts, cited)
 	c.QuoteMatched = matched
 	c.Evidence = evidenceFor(cited, covered)
-	speakerSegs := []Segment{cited[0]}
+	if len(parts) > 1 {
+		c.flag(FlagQuoteHasGap, "", "The quote leaves out words (\"...\"); omitted words can change the meaning, so read the full segment.")
+	}
+	speakerSegs := cited
 	if matched {
 		speakerSegs = covered
 		speakers := distinctSpeakers(covered)
@@ -149,9 +152,9 @@ func validateItem(id string, item RawItem, t *Transcript) Candidate {
 		}
 	}
 
-	checkOwner(&c, cited, t)
+	checkOwner(&c, cited, speakerSegs, t)
 	checkDue(&c, cited, t)
-	checkKindLanguage(&c)
+	checkKindLanguage(&c, speakerSegs)
 	checkLaterCorrection(&c, cited, t)
 	for _, s := range cited {
 		if matchesAny(instructionPatterns, s.Text) {
@@ -268,9 +271,9 @@ func segmentRange(segs []Segment) string {
 	return segs[0].ID + "-" + segs[len(segs)-1].ID
 }
 
-// checkOwner: an owner that is a speaker label must be the speaker of cited
-// evidence; any other owner must appear in the cited text.
-func checkOwner(c *Candidate, cited []Segment, t *Transcript) {
+// checkOwner: an owner that is a speaker label must be the speaker of the
+// quoted words (quoteSegs); any other owner must appear in the cited text.
+func checkOwner(c *Candidate, cited, quoteSegs []Segment, t *Transcript) {
 	if c.Owner == NotStated {
 		return
 	}
@@ -279,13 +282,13 @@ func checkOwner(c *Candidate, cited []Segment, t *Transcript) {
 		if normLabel(label) != want {
 			continue
 		}
-		for _, s := range cited {
+		for _, s := range quoteSegs {
 			if normLabel(s.Speaker) == want {
 				return
 			}
 		}
 		c.flag(FlagOwnerNotSupported, "",
-			"Owner %s is not the speaker of any cited segment; nothing cited shows %s taking this on.", c.Owner, c.Owner)
+			"Owner %s is not the speaker of the quoted words; nothing quoted shows %s taking this on.", c.Owner, c.Owner)
 		return
 	}
 	ownerWords := words(c.Owner)
@@ -303,7 +306,7 @@ func checkDue(c *Candidate, cited []Segment, t *Transcript) {
 	if c.Due == NotStated {
 		return
 	}
-	due := words(c.Due)
+	due := coreDueWords(c.Due)
 	if len(due) == 0 {
 		return
 	}
@@ -353,14 +356,22 @@ func checkLaterCorrection(c *Candidate, cited []Segment, t *Transcript) {
 }
 
 // checkKindLanguage flags commitments and decisions whose quote lacks explicit
-// wording. This is a lexical signal only.
-func checkKindLanguage(c *Candidate) {
+// wording. Negation and questions are also looked for in the full text of the
+// quoted segments, because a quote can stop short of, or skip over, a refusal.
+// This is a lexical signal only.
+func checkKindLanguage(c *Candidate, quoteSegs []Segment) {
 	q := words(c.Quote)
+	var seg []string
+	segQuestion := false
+	for _, s := range quoteSegs {
+		seg = append(seg, words(s.Text)...)
+		segQuestion = segQuestion || strings.Contains(s.Text, "?")
+	}
 	switch c.Kind {
 	case KindCommitment:
 		switch {
-		case hasAny(q, commitmentCues) && hasAny(q, negationCues):
-			c.flag(FlagCommitmentNotExplicit, "", "The quote contains negation; it may be a refusal rather than a commitment.")
+		case hasAny(q, commitmentCues) && (hasAny(q, negationCues) || hasAny(seg, negationCues)):
+			c.flag(FlagCommitmentNotExplicit, "", "The quote or its segment contains negative wording; it may be a refusal rather than a commitment.")
 		case hasAny(q, commitmentCues):
 		case hasAny(q, suggestionCues):
 			c.flag(FlagCommitmentNotExplicit, "", "The quote reads like a suggestion or request, not an explicit commitment.")
@@ -371,9 +382,11 @@ func checkKindLanguage(c *Candidate) {
 		switch {
 		case strings.Contains(c.Quote, "?"):
 			c.flag(FlagDecisionNotExplicit, "", "The quote is a question, not an agreement.")
+		case hasAny(q, suggestionCues) || hasAny(q, negationCues) || hasAny(seg, negationCues):
+			c.flag(FlagDecisionNotExplicit, "", "The quote or its segment reads like a proposal or a refusal, not an explicit agreement.")
+		case segQuestion:
+			c.flag(FlagDecisionNotExplicit, "", "The quoted segment contains a question; check that this was actually agreed.")
 		case hasAny(q, strongDecisionCues):
-		case hasAny(q, suggestionCues) || hasAny(q, negationCues):
-			c.flag(FlagDecisionNotExplicit, "", "The quote reads like a proposal or a refusal, not an explicit agreement.")
 		case hasAny(q, weakDecisionCues):
 		default:
 			c.flag(FlagDecisionNotExplicit, "", "The quote has no explicit agreement wording.")

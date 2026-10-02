@@ -158,6 +158,21 @@ var (
 	}
 )
 
+var dueLeadWords = map[string]bool{
+	"by": true, "on": true, "before": true, "until": true, "till": true, "at": true,
+	"in": true, "the": true, "this": true, "due": true, "no": true, "later": true, "than": true,
+}
+
+// coreDueWords drops leading words such as "by", "on" or "no later than", so
+// "by Monday" is matched as "Monday" in the evidence and in later corrections.
+func coreDueWords(due string) []string {
+	w := words(due)
+	for len(w) > 1 && dueLeadWords[w[0]] {
+		w = w[1:]
+	}
+	return w
+}
+
 // contradicts reports phrasing such as "not Monday" or "instead of Monday".
 func contradicts(hay, term []string) bool {
 	for _, prefix := range [][]string{{"not"}, {"instead", "of"}, {"rather", "than"}, {"no", "longer"}} {
